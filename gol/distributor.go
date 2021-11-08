@@ -9,6 +9,11 @@ type distributorChannels struct {
 	ioInput    <-chan uint8
 }
 
+func mod(x, m int) int {
+	return x & (m - 1)
+
+}
+
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
 
@@ -23,6 +28,7 @@ func distributor(p Params, c distributorChannels) {
 		// Split work between p.Threads threads
 		// Get work back
 		// TODO: Use bitshift instead of modulo
+		// n % 2^i = n & (2^i - 1)
 	}
 
 	// TODO: Report the final state using FinalTurnCompleteEvent.
