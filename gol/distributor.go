@@ -1,5 +1,7 @@
 package gol
 
+import "fmt"
+
 type distributorChannels struct {
 	events     chan<- Event
 	ioCommand  chan<- ioCommand
@@ -16,7 +18,8 @@ func mod(x, m int) int {
 
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
-
+	filename := fmt.Sprintf("%sx%s", p.ImageHeight, p.ImageWidth)
+	c.ioFilename <- filename
 	// TODO: Create a 2D slice to store the world.
 	a := make([][]byte, p.ImageHeight)
 	for i := range a {
