@@ -13,21 +13,26 @@ type distributorChannels struct {
 func distributor(p Params, c distributorChannels) {
 
 	// TODO: Create a 2D slice to store the world.
-
-	turn := 0
-
+	a := make([][]byte, p.ImageHeight)
+	for i := range a {
+		a[i] = make([]byte, p.ImageWidth)
+	}
 
 	// TODO: Execute all turns of the Game of Life.
+	for turn := 0; turn < p.Turns; turn++ {
+		// Split work between p.Threads threads
+		// Get work back
+		// TODO: Use bitshift instead of modulo
+	}
 
 	// TODO: Report the final state using FinalTurnCompleteEvent.
-
 
 	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
 	<-c.ioIdle
 
 	c.events <- StateChange{turn, Quitting}
-	
+
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	close(c.events)
 }
