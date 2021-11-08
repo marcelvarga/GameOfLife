@@ -23,8 +23,9 @@ func distributor(p Params, c distributorChannels) {
 		a[i] = make([]byte, p.ImageWidth)
 	}
 
+	turn := 0
 	// TODO: Execute all turns of the Game of Life.
-	for turn := 0; turn < p.Turns; turn++ {
+	for ; turn < p.Turns; turn++ {
 		// Split work between p.Threads threads
 		// Get work back
 		// TODO: Use bitshift instead of modulo
