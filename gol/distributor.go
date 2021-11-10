@@ -36,21 +36,24 @@ func distributor(p Params, c distributorChannels) {
 	boardHeight := len(world)
 	turn := 0
 	for ; turn < p.Turns; turn++ {
+		var newWorld [][]byte
+		var workerHeight int
 		if p.Threads == 1 {
 			world = calculateNextState(world, 0, boardHeight)
 		} else {
-			channels := make([]chan [][]byte, p.Threads)
+			threads := p.Threads
+
+			channels := make([]chan [][]byte, threads)
 			for i := range channels {
 				channels[i] = make(chan [][]byte)
 			}
-			workerHeight := boardHeight / p.Threads
-
-			for i := 0; i < p.Threads; i++ {
+			workerHeight = boardHeight / threads
+			i := 0
+			for ; i < threads-1; i++ {
 				go worker(world, i*workerHeight, (i+1)*workerHeight, channels[i])
 			}
-
-			var newWorld [][]byte
-			for i := 0; i < p.Threads; i++ {
+			go worker(world, i*workerHeight, boardHeight, channels[i])
+			for i := 0; i < threads; i++ {
 				newWorld = append(newWorld, <-channels[i]...)
 			}
 			world = newWorld
@@ -83,8 +86,7 @@ func worker(world [][]byte, startY, endY int, out chan<- [][]byte) {
 func calculateNextState(world [][]byte, startY, endY int) [][]byte {
 	height := endY - startY
 	totalHeight := len(world)
-	width := len(world[0])
-
+	width := len(world)
 	// New 2D that stores the next state
 	newWorld := make([][]byte, height)
 	for i := range newWorld {
@@ -96,7 +98,7 @@ func calculateNextState(world [][]byte, startY, endY int) [][]byte {
 
 	for i := 0; i < height; i++ {
 		for j := 0; j < width; j++ {
-			newWorld[i][j] = newCellValue(world, i, j, totalHeight, width)
+			newWorld[i][j] = newCellValue(world, i+startY, j, totalHeight, width)
 		}
 	}
 
