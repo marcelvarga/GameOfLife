@@ -33,9 +33,28 @@ func distributor(p Params, c distributorChannels) {
 		}
 	}
 
+	boardHeight := len(world)
 	turn := 0
 	for ; turn < p.Turns; turn++ {
-		world = calculateNextState(world)
+		if p.Threads == 1 {
+			world = calculateNextState(world, 0, boardHeight)
+		} else {
+			channels := make([]chan [][]byte, p.Threads)
+			for i := range channels {
+				channels[i] = make(chan [][]byte)
+			}
+			workerHeight := boardHeight / p.Threads
+
+			for i := 0; i < p.Threads; i++ {
+				go calculateNextState(world, i*workerHeight, (i+1)*workerHeight)
+			}
+
+			var newWorld [][]byte
+			for i := 0; i < p.Threads; i++ {
+				newWorld = append(newWorld, <-channels[i]...)
+			}
+			world = newWorld
+		}
 		// TODO Split work between p.Threads threads
 		// Get work back
 	}
@@ -55,22 +74,23 @@ func distributor(p Params, c distributorChannels) {
 	close(c.events)
 }
 
-func calculateNextState(world [][]byte) [][]byte {
-	var n = len(world)
-	var m = len(world[0])
+func calculateNextState(world [][]byte, startY, endY int) [][]byte {
+	height := endY - startY
+	totalHeight := len(world)
+	width := len(world[0])
 
 	// New 2D that stores the next state
-	newWorld := make([][]byte, n)
+	newWorld := make([][]byte, height)
 	for i := range newWorld {
-		newWorld[i] = make([]byte, m)
+		newWorld[i] = make([]byte, width)
 		for j := range newWorld[i] {
-			newWorld[i][j] = world[i][j]
+			newWorld[i][j] = world[i+startY][j]
 		}
 	}
 
-	for i := 0; i < n; i++ {
-		for j := 0; j < m; j++ {
-			newWorld[i][j] = newCellValue(world, i, j, n, m)
+	for i := 0; i < height; i++ {
+		for j := 0; j < width; j++ {
+			newWorld[i][j] = newCellValue(world, i, j, totalHeight, width)
 		}
 	}
 
@@ -87,13 +107,13 @@ func wrap(x, n int) int {
 	return x % n
 }
 
-func newCellValue(world [][]byte, x int, y int, rows int, cols int) byte {
+func newCellValue(world [][]byte, y int, x int, rows int, cols int) byte {
 	aliveNeighbours := 0
 
 	// Iterate through the neighbours and count how many of them are alive
-	for i := x - 1; i <= x+1; i++ {
-		for j := y - 1; j <= y+1; j++ {
-			if !(i == x && j == y) {
+	for i := y - 1; i <= y+1; i++ {
+		for j := x - 1; j <= x+1; j++ {
+			if !(i == y && j == x) {
 				if world[wrap(i, rows)][wrap(j, cols)] == alive {
 					aliveNeighbours++
 				}
@@ -101,7 +121,7 @@ func newCellValue(world [][]byte, x int, y int, rows int, cols int) byte {
 		}
 	}
 
-	if world[x][y] == alive {
+	if world[y][x] == alive {
 		if aliveNeighbours < 2 {
 			return dead
 		}
