@@ -46,7 +46,7 @@ func distributor(p Params, c distributorChannels) {
 			workerHeight := boardHeight / p.Threads
 
 			for i := 0; i < p.Threads; i++ {
-				go calculateNextState(world, i*workerHeight, (i+1)*workerHeight)
+				go worker(world, i*workerHeight, (i+1)*workerHeight, channels[i])
 			}
 
 			var newWorld [][]byte
@@ -74,6 +74,12 @@ func distributor(p Params, c distributorChannels) {
 	close(c.events)
 }
 
+// function used for splitting work between multiple threads
+// worker makes a "calculateNextState" call
+func worker(world [][]byte, startY, endY int, out chan<- [][]byte) {
+	partialWorld := calculateNextState(world, startY, endY)
+	out <- partialWorld
+}
 func calculateNextState(world [][]byte, startY, endY int) [][]byte {
 	height := endY - startY
 	totalHeight := len(world)
