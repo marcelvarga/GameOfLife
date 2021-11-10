@@ -2,6 +2,7 @@ package gol
 
 import (
 	"fmt"
+	"time"
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
@@ -35,31 +36,49 @@ func distributor(p Params, c distributorChannels) {
 
 	boardHeight := len(world)
 	turn := 0
+
+	ticker := time.Tick(2 * time.Second)
+	aliveCells0 := len(calculateAliveCells(world))
+
+	c.events <- AliveCellsCount{
+		CellsCount:     aliveCells0,
+		CompletedTurns: turn,
+	}
 	for ; turn < p.Turns; turn++ {
 		var newWorld [][]byte
 		var workerHeight int
-		if p.Threads == 1 {
-			world = calculateNextState(world, 0, boardHeight)
-		} else {
-			threads := p.Threads
+		select {
+		case <-ticker:
+			aliveCells := len(calculateAliveCells(world))
 
-			channels := make([]chan [][]byte, threads)
-			for i := range channels {
-				channels[i] = make(chan [][]byte)
+			c.events <- AliveCellsCount{
+				CellsCount:     aliveCells,
+				CompletedTurns: turn,
 			}
-			workerHeight = boardHeight / threads
-			i := 0
-			for ; i < threads-1; i++ {
-				go worker(world, i*workerHeight, (i+1)*workerHeight, channels[i])
+		default:
+			if p.Threads == 1 {
+				world = calculateNextState(world, 0, boardHeight)
+			} else {
+				threads := p.Threads
+
+				channels := make([]chan [][]byte, threads)
+				for i := range channels {
+					channels[i] = make(chan [][]byte)
+				}
+				workerHeight = boardHeight / threads
+				i := 0
+				for ; i < threads-1; i++ {
+					go worker(world, i*workerHeight, (i+1)*workerHeight, channels[i])
+				}
+				go worker(world, i*workerHeight, boardHeight, channels[i])
+				for i := 0; i < threads; i++ {
+					newWorld = append(newWorld, <-channels[i]...)
+				}
+				world = newWorld
 			}
-			go worker(world, i*workerHeight, boardHeight, channels[i])
-			for i := 0; i < threads; i++ {
-				newWorld = append(newWorld, <-channels[i]...)
-			}
-			world = newWorld
+			// TODO Split work between p.Threads threads
+			// Get work back
 		}
-		// TODO Split work between p.Threads threads
-		// Get work back
 	}
 
 	alive := calculateAliveCells(world)
@@ -75,6 +94,9 @@ func distributor(p Params, c distributorChannels) {
 
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	close(c.events)
+}
+func sayAliveCells(world [][]byte) {
+
 }
 
 // function used for splitting work between multiple threads
