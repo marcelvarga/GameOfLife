@@ -38,24 +38,19 @@ func distributor(p Params, c distributorChannels) {
 	turn := 0
 
 	ticker := time.Tick(2 * time.Second)
-	aliveCells0 := len(calculateAliveCells(world))
-
-	c.events <- AliveCellsCount{
-		CellsCount:     aliveCells0,
-		CompletedTurns: turn,
-	}
 	for ; turn < p.Turns; turn++ {
 		var newWorld [][]byte
 		var workerHeight int
 		select {
 		case <-ticker:
-			aliveCells := len(calculateAliveCells(world))
+			if turn != 0 {
+				aliveCells := len(calculateAliveCells(world))
 
-			c.events <- AliveCellsCount{
-				CellsCount:     aliveCells,
-				CompletedTurns: turn,
+				c.events <- AliveCellsCount{
+					CellsCount:     aliveCells,
+					CompletedTurns: turn,
+				}
 			}
-		default:
 			if p.Threads == 1 {
 				world = calculateNextState(world, 0, boardHeight)
 			} else {
@@ -75,6 +70,8 @@ func distributor(p Params, c distributorChannels) {
 					newWorld = append(newWorld, <-channels[i]...)
 				}
 				world = newWorld
+				complete := TurnComplete{CompletedTurns: turn}
+				c.events <- complete
 			}
 			// TODO Split work between p.Threads threads
 			// Get work back
