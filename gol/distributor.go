@@ -82,7 +82,21 @@ func distributor(p Params, c distributorChannels) {
 	//Send the final state on the events channel
 	c.events <- finalTurn
 	// Make sure that the Io has finished output before exiting.
+	c.ioCommand <- ioOutput
+	c.ioFilename <- filename
+	/*for i:=range world{
+		for j:=range world[i]{
+			c.ioOutput <- world[i][j]
+		}
+	}*/
+	for i := 0; i < p.ImageHeight; i++ {
+		for j := 0; j < p.ImageWidth; j++ {
+
+			c.ioOutput <- world[i][j]
+		}
+	}
 	c.ioCommand <- ioCheckIdle
+
 	<-c.ioIdle
 
 	c.events <- StateChange{turn, Quitting}
@@ -176,7 +190,7 @@ func newCellValue(world [][]byte, y int, x int, rows int, cols int) byte {
 	return dead
 }
 
-// Returns a slice with all of the alive cells
+// Returns a slice with all the alive cells
 func calculateAliveCells(world [][]byte) []util.Cell {
 	aliveCells := make([]util.Cell, 0)
 	for i := range world {
