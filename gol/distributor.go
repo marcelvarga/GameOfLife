@@ -104,12 +104,14 @@ func reportAliveCells(world [][]byte, ticker <-chan time.Time, c distributorChan
 	}
 }
 
-// function used for splitting work between multiple threads
+// Function used for splitting work between multiple threads
 // worker makes a "calculateNextState" call
 func worker(world [][]byte, startY, endY int, out chan<- [][]byte) {
 	partialWorld := calculateNextState(world, startY, endY)
 	out <- partialWorld
 }
+
+// Makes a transition between the Y coordinates given and returns a 2D slice containing the updated cells
 func calculateNextState(world [][]byte, startY, endY int) [][]byte {
 	height := endY - startY
 	totalHeight := len(world)
@@ -142,6 +144,7 @@ func wrap(x, n int) int {
 	return x % n
 }
 
+// Computes the value of a particular cell based on its neighbours
 func newCellValue(world [][]byte, y int, x int, rows int, cols int) byte {
 	aliveNeighbours := 0
 
@@ -173,6 +176,7 @@ func newCellValue(world [][]byte, y int, x int, rows int, cols int) byte {
 	return dead
 }
 
+// Returns a slice with all of the alive cells
 func calculateAliveCells(world [][]byte) []util.Cell {
 	aliveCells := make([]util.Cell, 0)
 	for i := range world {
