@@ -43,9 +43,11 @@ func distributor(p Params, c distributorChannels) {
 		var workerHeight int
 
 		if p.Threads == 1 {
+			reportAliveCells(world, ticker, c, turn)
 			world = calculateNextState(world, 0, boardHeight)
 			complete := TurnComplete{CompletedTurns: turn}
 			c.events <- complete
+
 		} else {
 
 			threads := p.Threads
