@@ -41,41 +41,37 @@ func distributor(p Params, c distributorChannels) {
 	for ; turn < p.Turns; turn++ {
 		var newWorld [][]byte
 		var workerHeight int
-		select {
-		case <-ticker:
-			if turn != 0 {
-				aliveCells := len(calculateAliveCells(world))
 
-				c.events <- AliveCellsCount{
-					CellsCount:     aliveCells,
-					CompletedTurns: turn,
-				}
-			}
-			if p.Threads == 1 {
-				world = calculateNextState(world, 0, boardHeight)
-			} else {
-				threads := p.Threads
+		if p.Threads == 1 {
+			world = calculateNextState(world, 0, boardHeight)
+			complete := TurnComplete{CompletedTurns: turn}
+			c.events <- complete
+		} else {
 
-				channels := make([]chan [][]byte, threads)
-				for i := range channels {
-					channels[i] = make(chan [][]byte)
-				}
-				workerHeight = boardHeight / threads
-				i := 0
-				for ; i < threads-1; i++ {
-					go worker(world, i*workerHeight, (i+1)*workerHeight, channels[i])
-				}
-				go worker(world, i*workerHeight, boardHeight, channels[i])
-				for i := 0; i < threads; i++ {
-					newWorld = append(newWorld, <-channels[i]...)
-				}
-				world = newWorld
-				complete := TurnComplete{CompletedTurns: turn}
-				c.events <- complete
+			threads := p.Threads
+
+			channels := make([]chan [][]byte, threads)
+			for i := range channels {
+				channels[i] = make(chan [][]byte)
 			}
-			// TODO Split work between p.Threads threads
-			// Get work back
+			workerHeight = boardHeight / threads
+			i := 0
+			for ; i < threads-1; i++ {
+				go worker(world, i*workerHeight, (i+1)*workerHeight, channels[i])
+			}
+			go worker(world, i*workerHeight, boardHeight, channels[i])
+			for i := 0; i < threads; i++ {
+				newWorld = append(newWorld, <-channels[i]...)
+
+			}
+			reportAliveCells(world, ticker, c, turn)
+			world = newWorld
+			complete := TurnComplete{CompletedTurns: turn}
+			c.events <- complete
 		}
+		// TODO Split work between p.Threads threads
+		// Get work back
+
 	}
 
 	alive := calculateAliveCells(world)
@@ -92,8 +88,18 @@ func distributor(p Params, c distributorChannels) {
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	close(c.events)
 }
-func sayAliveCells(world [][]byte) {
+func reportAliveCells(world [][]byte, ticker <-chan time.Time, c distributorChannels, turn int) {
+	select {
+	case <-ticker:
+		aliveCells := len(calculateAliveCells(world))
 
+		c.events <- AliveCellsCount{
+			CellsCount:     aliveCells,
+			CompletedTurns: turn,
+		}
+	default:
+		return
+	}
 }
 
 // function used for splitting work between multiple threads
