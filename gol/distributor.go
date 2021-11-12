@@ -71,8 +71,6 @@ func distributor(p Params, c distributorChannels) {
 			complete := TurnComplete{CompletedTurns: turn}
 			c.events <- complete
 		}
-		// TODO Split work between p.Threads threads
-		// Get work back
 
 	}
 
@@ -82,21 +80,18 @@ func distributor(p Params, c distributorChannels) {
 	//Send the final state on the events channel
 	c.events <- finalTurn
 	// Make sure that the Io has finished output before exiting.
-	c.ioCommand <- ioOutput
-	c.ioFilename <- filename
-	/*for i:=range world{
-		for j:=range world[i]{
-			c.ioOutput <- world[i][j]
-		}
-	}*/
-	for i := 0; i < p.ImageHeight; i++ {
-		for j := 0; j < p.ImageWidth; j++ {
 
+	c.ioCommand <- ioOutput
+	filename = filename + fmt.Sprintf("x%v", turn)
+	c.ioFilename <- filename
+
+	for i := range world {
+		for j := range world[i] {
 			c.ioOutput <- world[i][j]
 		}
 	}
-	c.ioCommand <- ioCheckIdle
 
+	c.ioCommand <- ioCheckIdle
 	<-c.ioIdle
 
 	c.events <- StateChange{turn, Quitting}
@@ -104,6 +99,8 @@ func distributor(p Params, c distributorChannels) {
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	close(c.events)
 }
+
+// If the ticker signalises that 2 seconds have passed, send an AliveCellsCount event down the c.events channel containing the number of alive cells
 func reportAliveCells(world [][]byte, ticker <-chan time.Time, c distributorChannels, turn int) {
 	select {
 	case <-ticker:
