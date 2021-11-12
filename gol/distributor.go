@@ -2,6 +2,7 @@ package gol
 
 import (
 	"fmt"
+	"github.com/veandco/go-sdl2/sdl"
 	"time"
 	"uk.ac.bris.cs/gameoflife/util"
 )
@@ -21,66 +22,115 @@ const (
 )
 
 // distributor divides the work between workers and interacts with other goroutines.
-func distributor(p Params, c distributorChannels) {
+func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 	filename := fmt.Sprintf("%dx%d", p.ImageHeight, p.ImageWidth)
 	c.ioCommand <- ioInput
 	c.ioFilename <- filename
-
+	action := make(chan int)
+	returned := make(chan bool)
 	world := make([][]byte, p.ImageHeight)
 	for i := range world {
 		world[i] = make([]byte, p.ImageWidth)
 		for j := range world[i] {
 			world[i][j] = <-c.ioInput
+			if world[i][j] == alive {
+				c.events <- CellFlipped{
+					Cell:           util.Cell{X: j, Y: i},
+					CompletedTurns: 0,
+				}
+			}
 		}
 	}
 
 	boardHeight := len(world)
 	turn := 0
-
+	turnRequest := make(chan int)
 	ticker := time.Tick(2 * time.Second)
+	go dealWithKey(turn, c, keyPresses, world, filename, turnRequest, action, returned)
 	for ; turn < p.Turns; turn++ {
 		var newWorld [][]byte
 		var workerHeight int
 
-		if p.Threads == 1 {
+		/*if p.Threads == 1 {
 			reportAliveCells(world, ticker, c, turn)
 			world = calculateNextState(world, 0, boardHeight)
 			complete := TurnComplete{CompletedTurns: turn}
 			c.events <- complete
 
-		} else {
+		} else {*/
 
-			threads := p.Threads
+		threads := p.Threads
 
-			channels := make([]chan [][]byte, threads)
-			for i := range channels {
-				channels[i] = make(chan [][]byte)
-			}
-			workerHeight = boardHeight / threads
-			i := 0
-			for ; i < threads-1; i++ {
-				go worker(world, i*workerHeight, (i+1)*workerHeight, channels[i])
-			}
-			go worker(world, i*workerHeight, boardHeight, channels[i])
-			for i := 0; i < threads; i++ {
-				newWorld = append(newWorld, <-channels[i]...)
+		channels := make([]chan [][]byte, threads)
+		for i := range channels {
+			channels[i] = make(chan [][]byte)
+		}
+		workerHeight = boardHeight / threads
+		i := 0
+		for ; i < threads-1; i++ {
+			go worker(world, i*workerHeight, (i+1)*workerHeight, channels[i], c, turn)
+		}
+		go worker(world, i*workerHeight, boardHeight, channels[i], c, turn)
+		for i := 0; i < threads; i++ {
+			newWorld = append(newWorld, <-channels[i]...)
 
-			}
-			reportAliveCells(world, ticker, c, turn)
-			world = newWorld
-			complete := TurnComplete{CompletedTurns: turn}
-			c.events <- complete
+		}
+		reportAliveCells(world, ticker, c, turn)
+		actOnAction := actOrReturn(action)
+		switch actOnAction {
+		case 1:
+			turnRequest <- turn
+			<-returned
 		}
 
+		world = newWorld
+		complete := TurnComplete{CompletedTurns: turn}
+		c.events <- complete
+		//}
+
+	}
+	if turn == p.Turns {
+		alive := calculateAliveCells(world)
+		finalTurn := FinalTurnComplete{CompletedTurns: turn, Alive: alive}
+
+		//Send the final state on the events channel
+		c.events <- finalTurn
+		// Make sure that the Io has finished output before exiting.
+
+		c.ioCommand <- ioOutput
+		filename = filename + fmt.Sprintf("x%v", turn)
+		c.ioFilename <- filename
+
+		for i := range world {
+			for j := range world[i] {
+				c.ioOutput <- world[i][j]
+			}
+		}
+
+		c.ioCommand <- ioCheckIdle
+		<-c.ioIdle
+
+		c.events <- StateChange{turn, Quitting}
+
+		// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
+		close(c.events)
 	}
 
-	alive := calculateAliveCells(world)
-	finalTurn := FinalTurnComplete{CompletedTurns: turn, Alive: alive}
-
-	//Send the final state on the events channel
-	c.events <- finalTurn
-	// Make sure that the Io has finished output before exiting.
-
+}
+func actOrReturn(action chan int) int {
+	select {
+	case <-action:
+		return 1
+	default:
+		return 0
+	}
+}
+func quit(c distributorChannels) {
+	c.ioCommand <- ioCheckIdle
+	<-c.ioIdle
+	close(c.events)
+}
+func screenShot(world [][]byte, c distributorChannels, filename string, turn int) {
 	c.ioCommand <- ioOutput
 	filename = filename + fmt.Sprintf("x%v", turn)
 	c.ioFilename <- filename
@@ -90,14 +140,49 @@ func distributor(p Params, c distributorChannels) {
 			c.ioOutput <- world[i][j]
 		}
 	}
+}
+func dealWithKey(turn int, c distributorChannels, keyPresses <-chan rune, world [][]byte, filename string, turnRequest, action chan int, returned chan bool) {
+	for {
+		select {
+		case key := <-keyPresses:
+			switch key {
+			case sdl.K_q:
+				quit(c)
+				returned <- false
+			case sdl.K_s:
+				screenShot(world, c, filename, turn)
+				quit(c)
+				action <- 0
+				returned <- false
+			case sdl.K_p:
+				action <- 1
+				fmt.Println(<-turnRequest)
+				pKey(turn, c, keyPresses, world, filename, action, returned)
+			}
 
-	c.ioCommand <- ioCheckIdle
-	<-c.ioIdle
+		}
+	}
 
-	c.events <- StateChange{turn, Quitting}
-
-	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
-	close(c.events)
+}
+func pKey(turn int, c distributorChannels, keyPresses <-chan rune, world [][]byte, filename string, action chan int, returned chan bool) {
+	select {
+	case key := <-keyPresses:
+		switch key {
+		case sdl.K_q:
+			quit(c)
+			//action <-0
+			returned <- false
+		case sdl.K_s:
+			screenShot(world, c, filename, turn)
+			quit(c)
+			//action <-0
+			returned <- false
+		case sdl.K_p:
+			fmt.Println("Continuing")
+			//action <-0
+			returned <- true
+		}
+	}
 }
 
 // If the ticker signalises that 2 seconds have passed, send an AliveCellsCount event down the c.events channel containing the number of alive cells
@@ -117,13 +202,13 @@ func reportAliveCells(world [][]byte, ticker <-chan time.Time, c distributorChan
 
 // Function used for splitting work between multiple threads
 // worker makes a "calculateNextState" call
-func worker(world [][]byte, startY, endY int, out chan<- [][]byte) {
-	partialWorld := calculateNextState(world, startY, endY)
+func worker(world [][]byte, startY, endY int, out chan<- [][]byte, c distributorChannels, turn int) {
+	partialWorld := calculateNextState(world, startY, endY, c, turn)
 	out <- partialWorld
 }
 
 // Makes a transition between the Y coordinates given and returns a 2D slice containing the updated cells
-func calculateNextState(world [][]byte, startY, endY int) [][]byte {
+func calculateNextState(world [][]byte, startY, endY int, c distributorChannels, turn int) [][]byte {
 	height := endY - startY
 	totalHeight := len(world)
 	width := len(world)
@@ -138,7 +223,7 @@ func calculateNextState(world [][]byte, startY, endY int) [][]byte {
 
 	for i := 0; i < height; i++ {
 		for j := 0; j < width; j++ {
-			newWorld[i][j] = newCellValue(world, i+startY, j, totalHeight, width)
+			newWorld[i][j] = newCellValue(world, i+startY, j, totalHeight, width, c, turn)
 		}
 	}
 
@@ -156,7 +241,7 @@ func wrap(x, n int) int {
 }
 
 // Computes the value of a particular cell based on its neighbours
-func newCellValue(world [][]byte, y int, x int, rows int, cols int) byte {
+func newCellValue(world [][]byte, y int, x int, rows int, cols int, c distributorChannels, turn int) byte {
 	aliveNeighbours := 0
 
 	// Iterate through the neighbours and count how many of them are alive
@@ -171,17 +256,25 @@ func newCellValue(world [][]byte, y int, x int, rows int, cols int) byte {
 	}
 
 	if world[y][x] == alive {
-		if aliveNeighbours < 2 {
+		if aliveNeighbours < 2 || aliveNeighbours > 3 {
+			c.events <- CellFlipped{
+				Cell:           util.Cell{X: y, Y: x},
+				CompletedTurns: turn,
+			}
 			return dead
 		}
 		if (aliveNeighbours == 2) || aliveNeighbours == 3 {
 			return alive
 		}
-		if aliveNeighbours > 3 {
+		/*if aliveNeighbours > 3 {
 			return dead
-		}
+		}*/
 	}
 	if aliveNeighbours == 3 {
+		c.events <- CellFlipped{
+			Cell:           util.Cell{X: y, Y: x},
+			CompletedTurns: turn,
+		}
 		return alive
 	}
 	return dead
