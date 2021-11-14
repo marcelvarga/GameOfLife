@@ -20,15 +20,22 @@ const (
 	dead  = 0
 	alive = 255
 )
+const (
+	noAction    = 0
+	pause       = 1
+	save        = 2
+	quitAndSave = 3
+)
 
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 	filename := fmt.Sprintf("%dx%d", p.ImageHeight, p.ImageWidth)
 	c.ioCommand <- ioInput
 	c.ioFilename <- filename
-	action := make(chan int)
-	returned := make(chan bool)
+	actionRequest := make(chan int)
+	resumeCh := make(chan bool)
 	world := make([][]byte, p.ImageHeight)
+
 	for i := range world {
 		world[i] = make([]byte, p.ImageWidth)
 		for j := range world[i] {
@@ -46,7 +53,8 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 	turn := 0
 	turnRequest := make(chan int)
 	ticker := time.Tick(2 * time.Second)
-	go dealWithKey(turn, c, keyPresses, world, filename, turnRequest, action, returned)
+	go dealWithKey(c, keyPresses, world, filename, turnRequest, actionRequest, resumeCh)
+
 	for ; turn < p.Turns; turn++ {
 		var newWorld [][]byte
 		var workerHeight int
@@ -67,60 +75,55 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 			newWorld = append(newWorld, <-channels[i]...)
 
 		}
-		reportAliveCells(world, ticker, c, turn)
-		actOnAction := actOrReturn(action)
-		switch actOnAction {
-		case 1:
-			turnRequest <- turn
-			<-returned
-		}
 
+		reportAliveCells(world, ticker, c, turn)
+
+		requestedAction := actOrReturn(actionRequest)
+		resume := true
+		if requestedAction == pause || requestedAction == save {
+			turnRequest <- turn
+			resume = <-resumeCh
+		}
+		if requestedAction == quitAndSave || resume == false {
+			quit(world, c, filename, turn)
+		}
 		world = newWorld
 		complete := TurnComplete{CompletedTurns: turn}
 		c.events <- complete
 
 	}
+
 	if turn == p.Turns {
-		alive := calculateAliveCells(world)
-		finalTurn := FinalTurnComplete{CompletedTurns: turn, Alive: alive}
-
-		//Send the final state on the events channel
-		c.events <- finalTurn
-		// Make sure that the Io has finished output before exiting.
-
-		c.ioCommand <- ioOutput
-		filename = filename + fmt.Sprintf("x%v", turn)
-		c.ioFilename <- filename
-
-		for i := range world {
-			for j := range world[i] {
-				c.ioOutput <- world[i][j]
-			}
-		}
-
-		c.ioCommand <- ioCheckIdle
-		<-c.ioIdle
-
-		c.events <- StateChange{turn, Quitting}
-
-		// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
-		close(c.events)
+		quit(world, c, filename, turn)
 	}
 
 }
-func actOrReturn(action chan int) int {
-	select {
-	case <-action:
-		return 1
-	default:
-		return 0
-	}
-}
-func quit(c distributorChannels) {
-	c.ioCommand <- ioCheckIdle
-	<-c.ioIdle
+
+func quit(world [][]byte, c distributorChannels, filename string, turn int) {
+	alive := calculateAliveCells(world)
+	finalTurn := FinalTurnComplete{CompletedTurns: turn, Alive: alive}
+
+	//Send the final state on the events channel
+	c.events <- finalTurn
+	// Make sure that the Io has finished output before exiting.
+
+	screenShot(world, c, filename, turn)
+
+	c.events <- StateChange{turn, Quitting}
+
+	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	close(c.events)
 }
+
+func actOrReturn(action chan int) int {
+	select {
+	case requestedAction := <-action:
+		return requestedAction
+	default:
+		return noAction
+	}
+}
+
 func screenShot(world [][]byte, c distributorChannels, filename string, turn int) {
 	c.ioCommand <- ioOutput
 	filename = filename + fmt.Sprintf("x%v", turn)
@@ -131,47 +134,50 @@ func screenShot(world [][]byte, c distributorChannels, filename string, turn int
 			c.ioOutput <- world[i][j]
 		}
 	}
+	c.ioCommand <- ioCheckIdle
+	<-c.ioIdle
 }
-func dealWithKey(turn int, c distributorChannels, keyPresses <-chan rune, world [][]byte, filename string, turnRequest, action chan int, returned chan bool) {
+
+func dealWithKey(c distributorChannels, keyPresses <-chan rune, world [][]byte, filename string, turnRequest, actionCh chan int, resumeCh chan bool) {
+	var turn int
 	for {
 		select {
 		case key := <-keyPresses:
 			switch key {
 			case sdl.K_q:
-				quit(c)
-				returned <- false
+				fmt.Println("Saving board and quitting")
+				actionCh <- quitAndSave
 			case sdl.K_s:
+				actionCh <- save
+				turn = <-turnRequest
 				screenShot(world, c, filename, turn)
-				quit(c)
-				action <- 0
-				returned <- false
+				resumeCh <- true
 			case sdl.K_p:
-				action <- 1
-				fmt.Println(<-turnRequest)
-				pKey(turn, c, keyPresses, world, filename, action, returned)
+				actionCh <- pause
+				turn = <-turnRequest
+				fmt.Printf("Completed turns %d     Paused\n", turn)
+				pKey(turn, c, keyPresses, world, filename, resumeCh)
 			}
 
 		}
 	}
 
 }
-func pKey(turn int, c distributorChannels, keyPresses <-chan rune, world [][]byte, filename string, action chan int, returned chan bool) {
-	select {
-	case key := <-keyPresses:
-		switch key {
-		case sdl.K_q:
-			quit(c)
-			//action <-0
-			returned <- false
-		case sdl.K_s:
-			screenShot(world, c, filename, turn)
-			quit(c)
-			//action <-0
-			returned <- false
-		case sdl.K_p:
-			fmt.Println("Continuing")
-			//action <-0
-			returned <- true
+func pKey(turn int, c distributorChannels, keyPresses <-chan rune, world [][]byte, filename string, resume chan bool) {
+	for {
+		select {
+		case key := <-keyPresses:
+			switch key {
+			case sdl.K_q:
+				fmt.Println("Saving board and quitting")
+				resume <- false
+			case sdl.K_s:
+				screenShot(world, c, filename, turn)
+			case sdl.K_p:
+				fmt.Println("Continuing...")
+				resume <- true
+				return
+			}
 		}
 	}
 }
