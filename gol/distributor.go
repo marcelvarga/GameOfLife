@@ -51,14 +51,6 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 		var newWorld [][]byte
 		var workerHeight int
 
-		/*if p.Threads == 1 {
-			reportAliveCells(world, ticker, c, turn)
-			world = calculateNextState(world, 0, boardHeight)
-			complete := TurnComplete{CompletedTurns: turn}
-			c.events <- complete
-
-		} else {*/
-
 		threads := p.Threads
 
 		channels := make([]chan [][]byte, threads)
@@ -86,7 +78,6 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 		world = newWorld
 		complete := TurnComplete{CompletedTurns: turn}
 		c.events <- complete
-		//}
 
 	}
 	if turn == p.Turns {
@@ -266,9 +257,6 @@ func newCellValue(world [][]byte, y int, x int, rows int, cols int, c distributo
 		if (aliveNeighbours == 2) || aliveNeighbours == 3 {
 			return alive
 		}
-		/*if aliveNeighbours > 3 {
-			return dead
-		}*/
 	}
 	if aliveNeighbours == 3 {
 		c.events <- CellFlipped{
