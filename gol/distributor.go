@@ -279,7 +279,7 @@ func newCellValue(world [][]byte, y int, x int, rows int, cols int, c distributo
 	if world[y][x] == alive {
 		if aliveNeighbours < 2 || aliveNeighbours > 3 {
 			c.events <- CellFlipped{
-				Cell:           util.Cell{X: y, Y: x},
+				Cell:           util.Cell{X: x, Y: y},
 				CompletedTurns: turn,
 			}
 			return dead
@@ -290,7 +290,7 @@ func newCellValue(world [][]byte, y int, x int, rows int, cols int, c distributo
 	}
 	if aliveNeighbours == 3 {
 		c.events <- CellFlipped{
-			Cell:           util.Cell{X: y, Y: x},
+			Cell:           util.Cell{X: x, Y: y},
 			CompletedTurns: turn,
 		}
 		return alive
