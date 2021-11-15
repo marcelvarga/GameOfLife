@@ -73,29 +73,36 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 		go worker(world, i*workerHeight, boardHeight, channels[i], c, turn)
 		for i := 0; i < threads; i++ {
 			newWorld = append(newWorld, <-channels[i]...)
-
 		}
 
 		reportAliveCells(world, ticker, c, turn)
 
 		requestedAction := actOrReturn(actionRequest)
 		resume := true
-		if requestedAction == pause || requestedAction == save {
+
+		if requestedAction == pause {
 			turnRequest <- turn
 			resume = <-resumeCh
 		}
-		if requestedAction == quitAndSave || resume == false {
-			quit(world, c, filename, turn)
+		if requestedAction == save {
+			screenShot(world, c, filename, turn)
+			resume = <-resumeCh
 		}
+		if requestedAction == quitAndSave || resume == false {
+			screenShot(world, c, filename, turn)
+			//time.Sleep(time.Second * 5)
+			quit(world, c, filename, turn)
+			return
+		}
+
 		world = newWorld
 		complete := TurnComplete{CompletedTurns: turn}
 		c.events <- complete
 
 	}
 
-	if turn == p.Turns {
-		quit(world, c, filename, turn)
-	}
+	screenShot(world, c, filename, turn)
+	quit(world, c, filename, turn)
 
 }
 
@@ -107,7 +114,7 @@ func quit(world [][]byte, c distributorChannels, filename string, turn int) {
 	c.events <- finalTurn
 	// Make sure that the Io has finished output before exiting.
 
-	screenShot(world, c, filename, turn)
+	//screenShot(world, c, filename, turn)
 
 	c.events <- StateChange{turn, Quitting}
 
@@ -149,8 +156,6 @@ func dealWithKey(c distributorChannels, keyPresses <-chan rune, world [][]byte, 
 				actionCh <- quitAndSave
 			case sdl.K_s:
 				actionCh <- save
-				turn = <-turnRequest
-				screenShot(world, c, filename, turn)
 				resumeCh <- true
 			case sdl.K_p:
 				actionCh <- pause
