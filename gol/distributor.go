@@ -28,6 +28,7 @@ const (
 )
 
 // distributor divides the work between workers and interacts with other goroutines.
+// Passes keypresses to dealWithKey
 func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 	filename := fmt.Sprintf("%dx%d", p.ImageHeight, p.ImageWidth)
 	c.ioCommand <- ioInput
@@ -53,7 +54,7 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 	turn := 0
 	turnRequest := make(chan int)
 	ticker := time.Tick(2 * time.Second)
-	go dealWithKey(c, keyPresses, world, filename, turnRequest, actionRequest, resumeCh)
+	go dealWithKey(keyPresses, turnRequest, actionRequest, resumeCh)
 
 	for ; turn < p.Turns; turn++ {
 		var newWorld [][]byte
@@ -82,7 +83,18 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 
 		if requestedAction == pause {
 			turnRequest <- turn
-			resume = <-resumeCh
+			secondAction := noAction
+			for secondAction != pause && secondAction != quitAndSave {
+				secondAction = <-actionRequest
+				if secondAction == save {
+					screenShot(world, c, filename, turn)
+				} else {
+					resume = <-resumeCh
+					if resume == false {
+						secondAction = quitAndSave
+					}
+				}
+			}
 		}
 		if requestedAction == save {
 			screenShot(world, c, filename, turn)
@@ -90,8 +102,7 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 		}
 		if requestedAction == quitAndSave || resume == false {
 			screenShot(world, c, filename, turn)
-			//time.Sleep(time.Second * 5)
-			quit(world, c, filename, turn)
+			quit(world, c, turn)
 			return
 		}
 
@@ -102,50 +113,34 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 	}
 
 	screenShot(world, c, filename, turn)
-	quit(world, c, filename, turn)
+	quit(world, c, turn)
 
 }
 
-func quit(world [][]byte, c distributorChannels, filename string, turn int) {
-	alive := calculateAliveCells(world)
-	finalTurn := FinalTurnComplete{CompletedTurns: turn, Alive: alive}
-
-	//Send the final state on the events channel
-	c.events <- finalTurn
-	// Make sure that the Io has finished output before exiting.
-
-	//screenShot(world, c, filename, turn)
-
-	c.events <- StateChange{turn, Quitting}
-
-	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
-	close(c.events)
+// Function used to wrap around the closed domain board
+// Uses optimization for the modulo operation if n is a power of two
+func wrap(x, n int) int {
+	x += n
+	if n != 0 && (n&(n-1)) == 0 {
+		return x & (n - 1)
+	}
+	return x % n
 }
 
-func actOrReturn(action chan int) int {
+// Helper function that checks if actionCh has any actions in it
+// Returns noAction otherwise
+func actOrReturn(actionCh chan int) int {
 	select {
-	case requestedAction := <-action:
+	case requestedAction := <-actionCh:
 		return requestedAction
 	default:
 		return noAction
 	}
 }
 
-func screenShot(world [][]byte, c distributorChannels, filename string, turn int) {
-	c.ioCommand <- ioOutput
-	filename = filename + fmt.Sprintf("x%v", turn)
-	c.ioFilename <- filename
-
-	for i := range world {
-		for j := range world[i] {
-			c.ioOutput <- world[i][j]
-		}
-	}
-	c.ioCommand <- ioCheckIdle
-	<-c.ioIdle
-}
-
-func dealWithKey(c distributorChannels, keyPresses <-chan rune, world [][]byte, filename string, turnRequest, actionCh chan int, resumeCh chan bool) {
+// Runs concurrently with distributor and deals with keypresses
+// Calls keyPressesOnPause if the execution is paused
+func dealWithKey(keyPresses <-chan rune, turnRequest, actionCh chan int, resumeCh chan bool) {
 	var turn int
 	for {
 		select {
@@ -161,30 +156,63 @@ func dealWithKey(c distributorChannels, keyPresses <-chan rune, world [][]byte, 
 				actionCh <- pause
 				turn = <-turnRequest
 				fmt.Printf("Completed turns %d     Paused\n", turn)
-				pKey(turn, c, keyPresses, world, filename, resumeCh)
+				keyPressesOnPause(keyPresses, resumeCh, actionCh)
 			}
 
 		}
 	}
 
 }
-func pKey(turn int, c distributorChannels, keyPresses <-chan rune, world [][]byte, filename string, resume chan bool) {
+
+func keyPressesOnPause(keyPresses <-chan rune, resumeCh chan bool, actionCh chan int) {
 	for {
 		select {
 		case key := <-keyPresses:
 			switch key {
 			case sdl.K_q:
 				fmt.Println("Saving board and quitting")
-				resume <- false
+				actionCh <- quitAndSave
+				resumeCh <- false
+				return
 			case sdl.K_s:
-				screenShot(world, c, filename, turn)
+				actionCh <- save
 			case sdl.K_p:
 				fmt.Println("Continuing...")
-				resume <- true
+				actionCh <- pause
+				resumeCh <- true
 				return
 			}
 		}
 	}
+}
+
+// Closes channels and sends Quitting event to SDL
+func quit(world [][]byte, c distributorChannels, turn int) {
+	alive := calculateAliveCells(world)
+	finalTurn := FinalTurnComplete{CompletedTurns: turn, Alive: alive}
+
+	//Send the final state on the events channel
+	c.events <- finalTurn
+
+	c.events <- StateChange{turn, Quitting}
+
+	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
+	close(c.events)
+}
+
+// Outputs world state to pgm file
+func screenShot(world [][]byte, c distributorChannels, filename string, turn int) {
+	c.ioCommand <- ioOutput
+	filename = filename + fmt.Sprintf("x%v", turn)
+	c.ioFilename <- filename
+
+	for i := range world {
+		for j := range world[i] {
+			c.ioOutput <- world[i][j]
+		}
+	}
+	c.ioCommand <- ioCheckIdle
+	<-c.ioIdle
 }
 
 // If the ticker signalises that 2 seconds have passed, send an AliveCellsCount event down the c.events channel containing the number of alive cells
@@ -232,17 +260,8 @@ func calculateNextState(world [][]byte, startY, endY int, c distributorChannels,
 	return newWorld
 }
 
-// Function used to wrap around the closed domain board
-// Uses optimization for the modulo operation if n is a power of two
-func wrap(x, n int) int {
-	x += n
-	if n != 0 && (n&(n-1)) == 0 {
-		return x & (n - 1)
-	}
-	return x % n
-}
-
 // Computes the value of a particular cell based on its neighbours
+// Sends CellFlipped events to notify the GUI about a change of state of a cell
 func newCellValue(world [][]byte, y int, x int, rows int, cols int, c distributorChannels, turn int) byte {
 	aliveNeighbours := 0
 
