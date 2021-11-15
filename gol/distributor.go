@@ -36,6 +36,7 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 	actionRequest := make(chan int)
 	resumeCh := make(chan bool)
 	world := make([][]byte, p.ImageHeight)
+	fmt.Println("hi")
 
 	for i := range world {
 		world[i] = make([]byte, p.ImageWidth)
