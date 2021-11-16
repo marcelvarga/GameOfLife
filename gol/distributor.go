@@ -36,7 +36,6 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 	actionRequest := make(chan int)
 	resumeCh := make(chan bool)
 	world := make([][]byte, p.ImageHeight)
-	fmt.Println("hi")
 
 	for i := range world {
 		world[i] = make([]byte, p.ImageWidth)
@@ -54,8 +53,8 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 	boardHeight := len(world)
 	turn := 0
 	turnRequest := make(chan int)
-	ticker := time.Tick(2 * time.Second)
-	go dealWithKey(keyPresses, turnRequest, actionRequest, resumeCh)
+	//ticker := time.Tick(2 * time.Second)
+	//go dealWithKey(keyPresses, turnRequest, actionRequest, resumeCh)
 
 	for ; turn < p.Turns; turn++ {
 		var newWorld [][]byte
@@ -77,7 +76,7 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 			newWorld = append(newWorld, <-channels[i]...)
 		}
 
-		reportAliveCells(world, ticker, c, turn)
+		//reportAliveCells(world, ticker, c, turn)
 
 		requestedAction := actOrReturn(actionRequest)
 		resume := true
