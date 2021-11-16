@@ -2,10 +2,14 @@ package gol
 
 var WorldEvolution = "SecretGolOperations.Evolve"
 
-type Response struct {
-	initialWorld [][]byte
+type Request struct {
+
+	InitialWorld [][]byte
+	P            Params
+	C            DistributorChannels
 }
 
-type Request struct {
-	outputWorld [][]byte
+type Response struct {
+	OutputWorld [][]byte
 }
+

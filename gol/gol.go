@@ -25,8 +25,8 @@ func Run(p Params, events chan<- Event, keyPresses <-chan rune) {
 		input:    ioInput,
 	}
 	go startIo(p, ioChannels)
-	distributorChannels := distributorChannels{
-		events:     events,
+	distributorChannels := DistributorChannels{
+		Events:     events,
 		ioCommand:  ioCommand,
 		ioIdle:     ioIdle,
 		ioFilename: ioFilename,
