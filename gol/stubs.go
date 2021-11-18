@@ -1,6 +1,6 @@
 package gol
 
-var WorldEvolution = "SecretGolOperations.Evolve"
+var WorldEvolution = "GolOperations.Evolve"
 
 type Request struct {
 
