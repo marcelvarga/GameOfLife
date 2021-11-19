@@ -25,6 +25,9 @@ func Run(p Params, events chan<- Event, keyPresses <-chan rune) {
 		output:   ioOutput,
 		input:    ioInput,
 	}
+	if p.Server == "" {
+		p.Server = "127.0.0.1:8030"
+	}
 	go startIo(p, ioChannels)
 	distributorChannels := distributorChannels{
 		events:     events,

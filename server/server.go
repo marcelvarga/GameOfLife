@@ -58,7 +58,7 @@ func (golOperation *GolOperations) Evolve(req gol.Request, res *gol.Response) (e
 		world = newWorld
 	}
 
-     res.OutputWorld = world
+	res.OutputWorld = world
 	fmt.Printf("Finished evolution of %d turns and sent response\n", turn)
 	return
 }
