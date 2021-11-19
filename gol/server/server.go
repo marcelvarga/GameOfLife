@@ -63,41 +63,6 @@ func (golOperation *GolOperations) Evolve(req gol.Request, res *gol.Response) (e
 	return
 }
 
-/*func (golOperations *GolOperations) Evolve(req gol.Request, resp *gol.Response) (err error) {
-	turn :=0
-	fmt.Println("proceeding to do the evolution")
-	world := req.InitialWorld
-	boardHeight := len(world)
-	ticker := time.Tick(2 * time.Second)
-	for ; turn < req.P.Turns; turn++ {
-		var newWorld [][]byte
-		var workerHeight int
-
-		threads := req.P.Threads
-
-		channels := make([]chan [][]byte, threads)
-		for i := range channels {
-			channels[i] = make(chan [][]byte)
-		}
-		workerHeight = boardHeight / threads
-		i := 0
-		for ; i < threads-1; i++ {
-			go worker(world, i*workerHeight, (i+1)*workerHeight, channels[i], req.C, turn)
-		}
-		go worker(world, i*workerHeight, boardHeight, channels[i], req.C, turn)
-		for i := 0; i < threads; i++ {
-			newWorld = append(newWorld, <-channels[i]...)
-		}
-		reportAliveCells(world, ticker, req.C, turn)
-		world = newWorld
-		complete := gol.TurnComplete{CompletedTurns: turn}
-		req.C.events <- complete
-		res.OutputWorld = world
-	}
-	return
-
-}*/
-
 // If the ticker signalises that 2 seconds have passed, send an AliveCellsCount event down the c.events channel containing the number of alive cells
 /*func reportAliveCells(world [][]byte, ticker <-chan time.Time, c gol.DistributorChannels, turn int) {
 	select {
