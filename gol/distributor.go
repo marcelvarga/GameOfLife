@@ -2,8 +2,8 @@ package gol
 
 import (
 	"fmt"
-
 	"net/rpc"
+	"time"
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
@@ -27,23 +27,39 @@ const (
 	quitAndSave = 3
 )
 
-func makeCall(client rpc.Client, world [][]byte, p Params, c distributorChannels) [][]byte {
+func makeCall(server rpc.Client, world [][]byte, p Params, c distributorChannels) [][]byte {
 	req := Request{
 		InitialWorld: world,
 		P:            p,
 		Events:       c.events,
 	}
 	resp := new(Response)
-	err := client.Call(WorldEvolution, req, resp)
+	err := server.Call(WorldEvolution, req, resp)
+
 	if err != nil {
 		panic(err)
 	}
 	return resp.OutputWorld
 }
+func requestAliveCells(server rpc.Client, ticker <-chan time.Time, c distributorChannels) {
+	req := RequestAliveCells{}
+	res := new(ReportAliveCells)
+	done := make(chan *rpc.Call, 1)
+	for {
+		<-ticker
+		err := server.Go(AliveCellsEvent, req, res, done)
+		fmt.Println(err)
+		<-done
+		c.events <- res.AliveCellsCountEv
+
+	}
+}
 
 // distributor divides the work between workers and interacts with other goroutines.
 // Passes keypresses to dealWithKey
 func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
+	ticker := time.Tick(2 * time.Second)
+
 	filename := fmt.Sprintf("%dx%d", p.ImageHeight, p.ImageWidth)
 	c.ioCommand <- ioInput
 	c.ioFilename <- filename
@@ -51,13 +67,14 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 	initialWorld := generateBoard(p, c)
 	world := initialWorld
 
-	client, err := rpc.Dial("tcp", p.Server)
+	server, err := rpc.Dial("tcp", p.Server)
 	if err != nil {
 		fmt.Println(err)
 	}
 	fmt.Println("Dialed successfully")
-	defer client.Close()
-	world = makeCall(*client, world, p, c)
+	defer server.Close()
+	go requestAliveCells(*server, ticker, c)
+	world = makeCall(*server, world, p, c)
 	quit(world, c, p.Turns)
 }
 func quit(world [][]byte, c distributorChannels, turn int) {

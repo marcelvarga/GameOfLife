@@ -6,9 +6,13 @@ import (
 	"net"
 	"net/rpc"
 	"uk.ac.bris.cs/gameoflife/gol"
+	"uk.ac.bris.cs/gameoflife/util"
 )
 
 type GolOperations struct{}
+
+var world [][]byte
+var turn = 0
 
 func main() {
 	pAddr := flag.String("port", "8030", "Port to listen on")
@@ -21,6 +25,7 @@ func main() {
 }
 
 func (golOperation *GolOperations) Evolve(req gol.Request, res *gol.Response) (err error) {
+	turn = 0
 	if req.InitialWorld == nil {
 		fmt.Println("Empty message")
 		return
@@ -28,15 +33,14 @@ func (golOperation *GolOperations) Evolve(req gol.Request, res *gol.Response) (e
 	fmt.Println("Got World")
 	fmt.Println(req.P)
 
-	turn := 0
 	fmt.Println("Proceeding to do the evolution")
-	world := req.InitialWorld
+	world = req.InitialWorld
 	boardHeight := len(world)
-	//ticker := time.Tick(2 * time.Second)
+
 	for ; turn < req.P.Turns; turn++ {
-		if turn%10 == 0 {
+		/*if turn%10 == 0 {
 			fmt.Printf("Processing turn %d\n", turn)
-		}
+		}*/
 		var newWorld [][]byte
 		var workerHeight int
 
@@ -61,6 +65,29 @@ func (golOperation *GolOperations) Evolve(req gol.Request, res *gol.Response) (e
 	res.OutputWorld = world
 	fmt.Printf("Finished evolution of %d turns and sent response\n", turn)
 	return
+}
+
+func (golOperation *GolOperations) ReportAliveCellsCount(req gol.RequestAliveCells, res *gol.ReportAliveCells) (err error) {
+	fmt.Println("Intra in metoda")
+	aliveCells := len(calculateAliveCells(world))
+
+	res.AliveCellsCountEv = gol.AliveCellsCount{
+		CellsCount:     aliveCells,
+		CompletedTurns: turn,
+	}
+	return
+}
+
+func calculateAliveCells(world [][]byte) []util.Cell {
+	aliveCells := make([]util.Cell, 0)
+	for i := range world {
+		for j := range world[i] {
+			if world[i][j] == gol.Alive {
+				aliveCells = append(aliveCells, util.Cell{X: j, Y: i})
+			}
+		}
+	}
+	return aliveCells
 }
 
 // If the ticker signalises that 2 seconds have passed, send an AliveCellsCount event down the c.events channel containing the number of alive cells

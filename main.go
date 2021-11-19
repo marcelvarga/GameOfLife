@@ -41,7 +41,7 @@ func main() {
 	flag.StringVar(
 		&params.Server,
 		"server",
-		"g127.0.0.1:8030",
+		"127.0.0.1:8030",
 		"IP:port of the server to connect to. Defaults to 127.0.0.1:8030")
 
 	noVis := flag.Bool(
