@@ -16,6 +16,8 @@ type distributorChannels struct {
 	ioInput    <-chan uint8
 }
 
+var x = true
+
 const (
 	Dead  = 0
 	Alive = 255
@@ -41,17 +43,21 @@ func makeCall(server rpc.Client, world [][]byte, p Params, c distributorChannels
 	}
 	return resp.OutputWorld
 }
-func requestAliveCells(server rpc.Client, ticker <-chan time.Time, c distributorChannels) {
+func requestAliveCells(server rpc.Client, ticker <-chan time.Time, c distributorChannels, stop chan bool) {
 	req := RequestAliveCells{}
 	res := new(ReportAliveCells)
 	done := make(chan *rpc.Call, 1)
 	for {
-		<-ticker
-		err := server.Go(AliveCellsEvent, req, res, done)
-		fmt.Println(err)
-		<-done
-		c.events <- res.AliveCellsCountEv
+		select {
+		case <-stop:
+			return
+		case <-ticker:
+			server.Go(AliveCellsEvent, req, res, done)
+			<-done
+			c.events <- res.AliveCellsCountEv
+		default:
 
+		}
 	}
 }
 
@@ -73,8 +79,10 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 	}
 	fmt.Println("Dialed successfully")
 	defer server.Close()
-	go requestAliveCells(*server, ticker, c)
+	stop := make(chan bool)
+	go requestAliveCells(*server, ticker, c, stop)
 	world = makeCall(*server, world, p, c)
+	stop <- true
 	quit(world, c, p.Turns)
 }
 func quit(world [][]byte, c distributorChannels, turn int) {
