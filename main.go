@@ -38,6 +38,12 @@ func main() {
 		10000000000,
 		"Specify the number of turns to process. Defaults to 10000000000.")
 
+	flag.StringVar(
+		&params.Server,
+		"server",
+		"127.0.0.1:8030",
+		"IP:port of the server to connect to. Defaults to 127.0.0.1:8030")
+
 	noVis := flag.Bool(
 		"noVis",
 		false,

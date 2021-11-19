@@ -4,16 +4,14 @@ import (
 	//"errors"
 	"flag"
 	"fmt"
-	"math/rand"
 	"net"
 	"net/rpc"
-	"time"
 	"uk.ac.bris.cs/gameoflife/gol"
-	"uk.ac.bris.cs/gameoflife/util"
 )
 
-type SecretGolOperations struct{}
+type GolOperations struct{}
 
+/*
 // Function used to wrap around the closed domain board
 // Uses optimization for the modulo operation if n is a power of two
 func wrap(x, n int) int {
@@ -69,6 +67,7 @@ func calculateNextState(world [][]byte, startY, endY int, c gol.DistributorChann
 	return newWorld
 }
 
+
 // Computes the value of a particular cell based on its neighbours
 // Sends CellFlipped events to notify the GUI about a change of state of a cell
 func newCellValue(world [][]byte, y int, x int, rows int, cols int, c gol.DistributorChannels, turn int) byte {
@@ -118,12 +117,19 @@ func calculateAliveCells(world [][]byte) []util.Cell {
 		}
 	}
 	return aliveCells
+}*/
+func (golOperation *GolOperations) Evolve(req gol.Request, res *gol.Response) (err error) {
+	if req.InitialWorld == nil {
+		fmt.Println("Empty message")
+		return
+	}
+	fmt.Println("Got World")
+	fmt.Println(req.P)
+	res.Message = "Hi"
+	return
 }
 
-func (s *SecretGolOperations) Evolve(
-	req gol.Request,
-	resp *gol.Response,
-) (err error) {
+/*func (golOperations *GolOperations) Evolve(req gol.Request, resp *gol.Response) (err error) {
 	turn :=0
 	fmt.Println("proceeding to do the evolution")
 	world := req.InitialWorld
@@ -156,14 +162,13 @@ func (s *SecretGolOperations) Evolve(
 	}
 	return
 
-}
-func main(){
-	pAddr := flag.String("port","8030","Port to listen on")
+}*/
+func main() {
+	pAddr := flag.String("port", "8030", "Port to listen on")
 	flag.Parse()
-	fmt.Println("Server is up and running")
-	rand.Seed(time.Now().UnixNano())
-	rpc.Register(&SecretGolOperations{})
+	rpc.Register(&GolOperations{})
 	listener, _ := net.Listen("tcp", ":"+*pAddr)
 	defer listener.Close()
+	fmt.Println("Server is up and running. Listening on port " + *pAddr)
 	rpc.Accept(listener)
 }

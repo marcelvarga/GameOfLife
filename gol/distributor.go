@@ -3,13 +3,13 @@ package gol
 import (
 	"fmt"
 	"net/rpc"
-	//"uk.ac.bris.cs/gameoflife/server"
+	//"uk.ac.bris.cs/gameoflife/gol/server"
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
 type DistributorChannels struct {
-	Events    chan<- Event
-	ioCommand chan<- ioCommand
+	Events     chan<- Event
+	ioCommand  chan<- ioCommand
 	ioIdle     <-chan bool
 	ioFilename chan<- string
 	ioOutput   chan<- uint8
@@ -26,15 +26,6 @@ const (
 	save        = 2
 	quitAndSave = 3
 )
-func makeCall(client rpc.Client, world [][]byte, p Params, c DistributorChannels){
-	request := Request{InitialWorld: world,
-						P: p,
-						C: c}
-	response := new(Response)
-	fmt.Println("inside the call function")
-	client.Call(WorldEvolution, request, response)
-	world = response.OutputWorld
-}
 
 // distributor divides the work between workers and interacts with other goroutines.
 // Passes keypresses to dealWithKey
@@ -42,18 +33,31 @@ func distributor(p Params, c DistributorChannels, keyPresses <-chan rune) {
 	filename := fmt.Sprintf("%dx%d", p.ImageHeight, p.ImageWidth)
 	c.ioCommand <- ioInput
 	c.ioFilename <- filename
-	world := generateBoard(p,c)
-	server :="127.0.0.1:8030"
-	client, _ := rpc.Dial("tcp", server)
-	fmt.Println("dialed successfully")
+	world := generateBoard(p, c)
+
+	client, err := rpc.Dial("tcp", p.Server)
+	if err != nil {
+		fmt.Println("Connection error")
+		quit(world, c, 0)
+		return
+	}
+	fmt.Println("Dialed successfully")
 	defer client.Close()
-	makeCall(*client,world,p,c)
+	makeCall(*client, world, p)
 
 	quit(world, c, p.Turns)
-
-
 }
-func generateBoard(p Params,c DistributorChannels) [][]byte{
+
+func makeCall(client rpc.Client, world [][]byte, p Params) {
+	request := Request{InitialWorld: world,
+		P: p}
+	response := new(Response)
+	client.Call(WorldEvolution, request, response)
+	message := response.Message
+	fmt.Println(message)
+}
+
+func generateBoard(p Params, c DistributorChannels) [][]byte {
 	world := make([][]byte, p.ImageHeight)
 
 	for i := range world {
@@ -70,6 +74,7 @@ func generateBoard(p Params,c DistributorChannels) [][]byte{
 	}
 	return world
 }
+
 // Closes channels and sends Quitting event to SDL
 func quit(world [][]byte, c DistributorChannels, turn int) {
 
