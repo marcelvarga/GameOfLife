@@ -8,6 +8,5 @@ type Request struct {
 }
 
 type Response struct {
-	//OutputWorld [][]byte
-	Message string
+	OutputWorld [][]byte
 }

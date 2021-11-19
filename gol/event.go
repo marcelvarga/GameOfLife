@@ -67,7 +67,7 @@ type FinalTurnComplete struct {
 	Alive          []util.Cell
 }
 
-// String methods allow the different types of Events and States to be printed.
+// String methods allow the different types of events and States to be printed.
 
 func (state State) String() string {
 	switch state {
