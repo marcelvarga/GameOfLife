@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"net"
 	"net/rpc"
+	"sync"
 	"uk.ac.bris.cs/gameoflife/gol"
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
 type GolOperations struct{}
 
+var mutex sync.Mutex
 var world [][]byte
 var turn = 0
 
@@ -25,7 +27,6 @@ func main() {
 }
 
 func (golOperation *GolOperations) Evolve(req gol.Request, res *gol.Response) (err error) {
-	turn = 0
 	if req.InitialWorld == nil {
 		fmt.Println("Empty message")
 		return
@@ -37,10 +38,8 @@ func (golOperation *GolOperations) Evolve(req gol.Request, res *gol.Response) (e
 	world = req.InitialWorld
 	boardHeight := len(world)
 
-	for ; turn < req.P.Turns; turn++ {
-		/*if turn%10 == 0 {
-			fmt.Printf("Processing turn %d\n", turn)
-		}*/
+	turn = 0
+	for turn < req.P.Turns {
 		var newWorld [][]byte
 		var workerHeight int
 
@@ -59,7 +58,11 @@ func (golOperation *GolOperations) Evolve(req gol.Request, res *gol.Response) (e
 		for i := 0; i < threads; i++ {
 			newWorld = append(newWorld, <-channels[i]...)
 		}
+
+		mutex.Lock()
 		world = newWorld
+		turn++
+		mutex.Unlock()
 	}
 
 	res.OutputWorld = world
@@ -69,11 +72,15 @@ func (golOperation *GolOperations) Evolve(req gol.Request, res *gol.Response) (e
 
 func (golOperation *GolOperations) ReportAliveCellsCount(req gol.RequestAliveCells, res *gol.ReportAliveCells) (err error) {
 	fmt.Println("Intra in metoda")
+
+	mutex.Lock()
 	aliveCells := len(calculateAliveCells(world))
+	turnCount := turn
+	mutex.Unlock()
 
 	res.AliveCellsCountEv = gol.AliveCellsCount{
 		CellsCount:     aliveCells,
-		CompletedTurns: turn,
+		CompletedTurns: turnCount,
 	}
 	return
 }
@@ -89,21 +96,6 @@ func calculateAliveCells(world [][]byte) []util.Cell {
 	}
 	return aliveCells
 }
-
-// If the ticker signalises that 2 seconds have passed, send an AliveCellsCount event down the c.events channel containing the number of alive cells
-/*func reportAliveCells(world [][]byte, ticker <-chan time.Time, c gol.DistributorChannels, turn int) {
-	select {
-	case <-ticker:
-		aliveCells := len(calculateAliveCells(world))
-
-		c.events <- gol.AliveCellsCount{
-			CellsCount:     aliveCells,
-			CompletedTurns: turn,
-		}
-	default:
-		return
-	}
-}*/
 
 // Function used for splitting work between multiple threads
 // worker makes a "calculateNextState" call
