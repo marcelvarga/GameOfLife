@@ -15,17 +15,25 @@ type GolOperations struct{}
 var mutex sync.Mutex
 var world [][]byte
 var turn = 0
-
+var keys chan rune
+var shutdown chan bool
+var listener net.Listener
+var queue = make([]gol.CellFlipped, 0)
 func main() {
 	pAddr := flag.String("port", "8030", "Port to listen on")
 	flag.Parse()
 	rpc.Register(&GolOperations{})
 	listener, _ := net.Listen("tcp", ":"+*pAddr)
-	defer listener.Close()
+	//defer listener.Close()
 	fmt.Println("Server is up and running. Listening on port " + *pAddr)
 	rpc.Accept(listener)
+	<-shutdown
+	fmt.Println("Shutting down the server")
+	listener.Close()
 }
-
+func Close(){
+	listener.Close()
+}
 func (golOperation *GolOperations) Evolve(req gol.Request, res *gol.Response) (err error) {
 	if req.InitialWorld == nil {
 		fmt.Println("Empty message")
@@ -71,8 +79,6 @@ func (golOperation *GolOperations) Evolve(req gol.Request, res *gol.Response) (e
 }
 
 func (golOperation *GolOperations) ReportAliveCellsCount(req gol.RequestAliveCells, res *gol.ReportAliveCells) (err error) {
-	fmt.Println("Intra in metoda")
-
 	mutex.Lock()
 	aliveCells := len(calculateAliveCells(world))
 	turnCount := turn
@@ -84,7 +90,32 @@ func (golOperation *GolOperations) ReportAliveCellsCount(req gol.RequestAliveCel
 	}
 	return
 }
+func (g *GolOperations) GetFlip(req gol.RequestCellFlip,res *gol.GetCellFlip) (err error){
+	if len(queue) >0{
+		res.Flip = queue[0]
+		queue = queue[1:]
+	}
+	return
+}
+func (g *GolOperations) ShutDown(req gol.RequestForKey,res *gol.ReceiveFromKey) (err error){
+	mutex.Lock()
+	res.Turn = turn
+	res.ScreenshotWorld = world
+	mutex.Unlock()
+	shutdown <-true
+	return
+}
+func (g *GolOperations) Saving(req gol.RequestForKey,res *gol.ReceiveFromKey) (err error){
+	mutex.Lock()
+	res.Turn = turn
+	res.ScreenshotWorld = world
+	mutex.Unlock()
+	return
+}
 
+func (g *GolOperations) Quitting(req gol.RequestForKey, res *gol.ReceiveFromKey) (err error){
+	return
+}
 func calculateAliveCells(world [][]byte) []util.Cell {
 	aliveCells := make([]util.Cell, 0)
 	for i := range world {
@@ -145,6 +176,10 @@ func newCellValue(world [][]byte, y int, x int, rows int, cols int) byte {
 
 	if world[y][x] == gol.Alive {
 		if aliveNeighbours < 2 || aliveNeighbours > 3 {
+			/*queue= append(queue, gol.CellFlipped{
+				Cell:           util.Cell{X: x, Y: y},
+				CompletedTurns: turn,
+			})*/
 			return gol.Dead
 		}
 		if (aliveNeighbours == 2) || aliveNeighbours == 3 {
@@ -152,6 +187,10 @@ func newCellValue(world [][]byte, y int, x int, rows int, cols int) byte {
 		}
 	} else {
 		if aliveNeighbours == 3 {
+			/*queue= append(queue, gol.CellFlipped{
+				Cell:           util.Cell{X: x, Y: y},
+				CompletedTurns: turn,
+			})*/
 			return gol.Alive
 		}
 	}
