@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/rpc"
 	"sync"
+	"time"
 	"uk.ac.bris.cs/gameoflife/gol"
 	"uk.ac.bris.cs/gameoflife/util"
 )
@@ -16,9 +17,12 @@ var mutex sync.Mutex
 var world [][]byte
 var turn = 0
 var keys chan rune
-var shutdown chan bool
-var listener net.Listener
+
+var pause =make(chan bool)
+var shutDown =make(chan bool)
+var shut =make(chan bool)
 var queue = make([]gol.CellFlipped, 0)
+var listener net.Listener
 func main() {
 	pAddr := flag.String("port", "8030", "Port to listen on")
 	flag.Parse()
@@ -26,14 +30,12 @@ func main() {
 	listener, _ := net.Listen("tcp", ":"+*pAddr)
 	//defer listener.Close()
 	fmt.Println("Server is up and running. Listening on port " + *pAddr)
-	rpc.Accept(listener)
-	<-shutdown
-	fmt.Println("Shutting down the server")
-	listener.Close()
+	go rpc.Accept(listener)
+	<-shutDown
+	time.Sleep(2*time.Second)
+	 defer listener.Close()
 }
-func Close(){
-	listener.Close()
-}
+
 func (golOperation *GolOperations) Evolve(req gol.Request, res *gol.Response) (err error) {
 	if req.InitialWorld == nil {
 		fmt.Println("Empty message")
@@ -67,6 +69,17 @@ func (golOperation *GolOperations) Evolve(req gol.Request, res *gol.Response) (e
 			newWorld = append(newWorld, <-channels[i]...)
 		}
 
+		select {
+		case <-shut:
+			fmt.Println("exiting the method")
+			return
+			case <-pause:
+				fmt.Println("Receive the pause in evolve,waiting for the second one")
+				<-pause
+				fmt.Println("Got the second pause, going to continue the evolution of the game")
+		default:
+
+		}
 		mutex.Lock()
 		world = newWorld
 		turn++
@@ -98,11 +111,25 @@ func (g *GolOperations) GetFlip(req gol.RequestCellFlip,res *gol.GetCellFlip) (e
 	return
 }
 func (g *GolOperations) ShutDown(req gol.RequestForKey,res *gol.ReceiveFromKey) (err error){
+
+	shutDown <-true
+	shut <-true
+	return
+}
+func (golOperation *GolOperations) Pausing(req gol.RequestForKey,res *gol.ReceiveFromKey) (err error){
+	fmt.Println("execution will pause")
 	mutex.Lock()
-	res.Turn = turn
-	res.ScreenshotWorld = world
+	fmt.Println("inside the mutex")
+	pause <-true
+	res.Turn=turn
+	res.ScreenshotWorld=world
 	mutex.Unlock()
-	shutdown <-true
+	fmt.Println("got out of the mutex in the pausing method")
+	return
+}
+func (g *GolOperations) Resume(req gol.RequestForKey,res *gol.ReceiveFromKey) (err error){
+	fmt.Println("execution will resume now")
+	pause <-false
 	return
 }
 func (g *GolOperations) Saving(req gol.RequestForKey,res *gol.ReceiveFromKey) (err error){
@@ -114,6 +141,10 @@ func (g *GolOperations) Saving(req gol.RequestForKey,res *gol.ReceiveFromKey) (e
 }
 
 func (g *GolOperations) Quitting(req gol.RequestForKey, res *gol.ReceiveFromKey) (err error){
+	mutex.Lock()
+	res.Turn = turn
+	res.ScreenshotWorld = world
+	mutex.Unlock()
 	return
 }
 func calculateAliveCells(world [][]byte) []util.Cell {
