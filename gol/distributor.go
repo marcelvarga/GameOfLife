@@ -67,11 +67,19 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 			channels[i] = make(chan [][]byte)
 		}
 		workerHeight = boardHeight / threads
-		i := 0
-		for ; i < threads-1; i++ {
-			go worker(world, i*workerHeight, (i+1)*workerHeight, channels[i], c, turn)
+
+		if threads != 1 {
+			go worker(append(world[len(world)-1:], world[:workerHeight+1]...), workerHeight, channels[0], c, turn, 0)
+			i := 1
+			for ; i < threads-1; i++ {
+				go worker(world[i*workerHeight-1:(i+1)*workerHeight+1], workerHeight, channels[i], c, turn, workerHeight*i)
+			}
+			go worker(append(world[i*workerHeight-1:], world[:1]...), boardHeight-workerHeight*i, channels[i], c, turn, workerHeight*i)
+
+		} else {
+			go worker(append(append(world[len(world)-1:], world...), world[:1]...), workerHeight, channels[0], c, turn, 0)
 		}
-		go worker(world, i*workerHeight, boardHeight, channels[i], c, turn)
+
 		for i := 0; i < threads; i++ {
 			newWorld = append(newWorld, <-channels[i]...)
 		}
@@ -232,28 +240,24 @@ func reportAliveCells(world [][]byte, ticker <-chan time.Time, c distributorChan
 
 // Function used for splitting work between multiple threads
 // worker makes a "calculateNextState" call
-func worker(world [][]byte, startY, endY int, out chan<- [][]byte, c distributorChannels, turn int) {
-	partialWorld := calculateNextState(world, startY, endY, c, turn)
+func worker(world [][]byte, height int, out chan<- [][]byte, c distributorChannels, turn, offset int) {
+	partialWorld := calculateNextState(world, height, c, turn, offset)
 	out <- partialWorld
 }
 
 // Makes a transition between the Y coordinates given and returns a 2D slice containing the updated cells
-func calculateNextState(world [][]byte, startY, endY int, c distributorChannels, turn int) [][]byte {
-	height := endY - startY
-	totalHeight := len(world)
-	width := len(world)
+func calculateNextState(world [][]byte, height int, c distributorChannels, turn, offset int) [][]byte {
+
+	width := len(world[0])
 	// New 2D that stores the next state
 	newWorld := make([][]byte, height)
 	for i := range newWorld {
 		newWorld[i] = make([]byte, width)
-		for j := range newWorld[i] {
-			newWorld[i][j] = world[i+startY][j]
-		}
 	}
 
 	for i := 0; i < height; i++ {
 		for j := 0; j < width; j++ {
-			newWorld[i][j] = newCellValue(world, i+startY, j, totalHeight, width, c, turn)
+			newWorld[i][j] = newCellValue(world, i+1, j, width, c, turn, offset)
 		}
 	}
 
@@ -262,14 +266,14 @@ func calculateNextState(world [][]byte, startY, endY int, c distributorChannels,
 
 // Computes the value of a particular cell based on its neighbours
 // Sends CellFlipped events to notify the GUI about a change of state of a cell
-func newCellValue(world [][]byte, y int, x int, rows int, cols int, c distributorChannels, turn int) byte {
+func newCellValue(world [][]byte, y, x, cols int, c distributorChannels, turn, offset int) byte {
 	aliveNeighbours := 0
 
 	// Iterate through the neighbours and count how many of them are alive
 	for i := y - 1; i <= y+1; i++ {
 		for j := x - 1; j <= x+1; j++ {
 			if !(i == y && j == x) {
-				if world[wrap(i, rows)][wrap(j, cols)] == alive {
+				if world[i][wrap(j, cols)] == alive {
 					aliveNeighbours++
 				}
 			}
@@ -279,7 +283,7 @@ func newCellValue(world [][]byte, y int, x int, rows int, cols int, c distributo
 	if world[y][x] == alive {
 		if aliveNeighbours < 2 || aliveNeighbours > 3 {
 			c.events <- CellFlipped{
-				Cell:           util.Cell{X: x, Y: y},
+				Cell:           util.Cell{X: x, Y: y + offset - 1},
 				CompletedTurns: turn,
 			}
 			return dead
@@ -290,7 +294,7 @@ func newCellValue(world [][]byte, y int, x int, rows int, cols int, c distributo
 	}
 	if aliveNeighbours == 3 {
 		c.events <- CellFlipped{
-			Cell:           util.Cell{X: x, Y: y},
+			Cell:           util.Cell{X: x, Y: y + offset - 1},
 			CompletedTurns: turn,
 		}
 		return alive
