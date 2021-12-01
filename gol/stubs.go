@@ -2,19 +2,20 @@ package gol
 
 var WorldEvolution = "GolOperations.Evolve"
 var AliveCellsEvent = "GolOperations.ReportAliveCellsCount"
-var SendFLip="GolOperations.GetFLip"
-var Save ="GolOperations.Saving"
-var Quit ="GolOperations.Quitting"
-var Shut ="GolOperations.ShutDown"
-var Pause ="GolOperations.Pausing"
-var ContinueFromPause ="GolOperations.Resume"
+var SendFLip = "GolOperations.GetFLip"
+var Save = "GolOperations.Save"
+var Quit = "GolOperations.Quit"
+var Shut = "GolOperations.Kill"
+var Pause = "GolOperations.Pause"
+var Resume = "GolOperations.Resume"
+
 type Request struct {
 	InitialWorld [][]byte
 	P            Params
 	Events       chan<- Event
 }
 
-type Response struct {
+type Result struct {
 	OutputWorld [][]byte
 }
 
@@ -26,15 +27,13 @@ type ReportAliveCells struct {
 }
 
 type RequestCellFlip struct {
-
 }
 type GetCellFlip struct {
 	Flip CellFlipped
 }
 type RequestForKey struct {
-
 }
 type ReceiveFromKey struct {
 	ScreenshotWorld [][]byte
-	Turn int
+	Turn            int
 }
