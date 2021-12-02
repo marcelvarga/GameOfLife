@@ -5,7 +5,7 @@ var AliveCellsEvent = "GolOperations.ReportAliveCellsCount"
 var SendFLip = "GolOperations.GetFLip"
 var Save = "GolOperations.Save"
 var Quit = "GolOperations.Quit"
-var Shut = "GolOperations.Kill"
+var Kill = "GolOperations.Kill"
 var Pause = "GolOperations.Pause"
 var Resume = "GolOperations.Resume"
 
@@ -17,6 +17,7 @@ type Request struct {
 
 type Result struct {
 	OutputWorld [][]byte
+	Turn        int
 }
 
 type RequestAliveCells struct {

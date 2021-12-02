@@ -16,6 +16,7 @@ type GolOperations struct{}
 var mutex sync.Mutex
 var world [][]byte
 var turn = 0
+var stopReporting = false
 
 var pause = make(chan bool)
 var kill = make(chan bool)
@@ -35,12 +36,18 @@ func main() {
 	fmt.Println("Server is up and running. Listening on port " + *pAddr)
 	go rpc.Accept(listener)
 	<-kill
-	time.Sleep(2 * time.Second)
+	time.Sleep(5 * time.Second)
 	defer listener.Close()
 
 }
 
 func (golOperation *GolOperations) Evolve(req gol.Request, res *gol.Result) (err error) {
+	//Initialize global variables for handling the new client
+	mutex.Lock()
+	stopReporting = false
+	turn = 0
+	mutex.Unlock()
+
 	if req.InitialWorld == nil {
 		fmt.Println("Empty message")
 		return
@@ -52,7 +59,6 @@ func (golOperation *GolOperations) Evolve(req gol.Request, res *gol.Result) (err
 	world = req.InitialWorld
 	boardHeight := len(world)
 
-	turn = 0
 	for turn < req.P.Turns {
 		var newWorld [][]byte
 		var workerHeight int
@@ -64,11 +70,18 @@ func (golOperation *GolOperations) Evolve(req gol.Request, res *gol.Result) (err
 			channels[i] = make(chan [][]byte)
 		}
 		workerHeight = boardHeight / threads
-		i := 0
-		for ; i < threads-1; i++ {
-			go worker(world, i*workerHeight, (i+1)*workerHeight, channels[i])
+		if threads != 1 {
+			go worker(append(world[len(world)-1:], world[:workerHeight+1]...), workerHeight, channels[0], 0)
+			i := 1
+			for ; i < threads-1; i++ {
+				go worker(world[i*workerHeight-1:(i+1)*workerHeight+1], workerHeight, channels[i], workerHeight*i)
+			}
+			go worker(append(world[i*workerHeight-1:], world[:1]...), boardHeight-workerHeight*i, channels[i], workerHeight*i)
+
+		} else {
+			go worker(append(append(world[len(world)-1:], world...), world[:1]...), workerHeight, channels[0], 0)
 		}
-		go worker(world, i*workerHeight, boardHeight, channels[i])
+
 		for i := 0; i < threads; i++ {
 			newWorld = append(newWorld, <-channels[i]...)
 		}
@@ -76,7 +89,10 @@ func (golOperation *GolOperations) Evolve(req gol.Request, res *gol.Result) (err
 		select {
 		case <-quit:
 			fmt.Println("Quitting connection to client")
+			stopReporting = true
 			mutex.Lock()
+			res.OutputWorld = world
+			res.Turn = turn
 			turn = 0
 			mutex.Unlock()
 			return
@@ -85,8 +101,8 @@ func (golOperation *GolOperations) Evolve(req gol.Request, res *gol.Result) (err
 			<-pause
 			fmt.Println("Got the second pause, going to continue the evolution of the game")
 		default:
-
 		}
+
 		mutex.Lock()
 		world = newWorld
 		turn++
@@ -99,6 +115,13 @@ func (golOperation *GolOperations) Evolve(req gol.Request, res *gol.Result) (err
 }
 
 func (golOperation *GolOperations) ReportAliveCellsCount(req gol.RequestAliveCells, res *gol.ReportAliveCells) (err error) {
+	if stopReporting == true {
+		return
+	}
+
+	if world == nil {
+		return
+	}
 	mutex.Lock()
 	aliveCells := len(calculateAliveCells(world))
 	turnCount := turn
@@ -123,6 +146,14 @@ func (golOperation *GolOperations) Kill(req gol.RequestForKey, res *gol.ReceiveF
 	quit <- true
 	return
 }
+func (golOperation *GolOperations) Quit(req gol.RequestForKey, res *gol.ReceiveFromKey) (err error) {
+	mutex.Lock()
+	res.Turn = turn
+	res.ScreenshotWorld = world
+	quit <- true
+	mutex.Unlock()
+	return
+}
 func (golOperation *GolOperations) Pause(req gol.RequestForKey, res *gol.ReceiveFromKey) (err error) {
 	fmt.Println("Pausing")
 	mutex.Lock()
@@ -145,14 +176,6 @@ func (golOperation *GolOperations) Save(req gol.RequestForKey, res *gol.ReceiveF
 	return
 }
 
-func (golOperation *GolOperations) Quit(req gol.RequestForKey, res *gol.ReceiveFromKey) (err error) {
-	mutex.Lock()
-	res.Turn = turn
-	res.ScreenshotWorld = world
-	quit <- true
-	mutex.Unlock()
-	return
-}
 func calculateAliveCells(world [][]byte) []util.Cell {
 	aliveCells := make([]util.Cell, 0)
 	for i := range world {
@@ -167,28 +190,24 @@ func calculateAliveCells(world [][]byte) []util.Cell {
 
 // Function used for splitting work between multiple threads
 // worker makes a "calculateNextState" call
-func worker(world [][]byte, startY, endY int, out chan<- [][]byte) {
-	partialWorld := calculateNextState(world, startY, endY)
+func worker(world [][]byte, height int, out chan<- [][]byte, offset int) {
+	partialWorld := calculateNextState(world, height)
 	out <- partialWorld
 }
 
 // Makes a transition between the Y coordinates given and returns a 2D slice containing the updated cells
-func calculateNextState(world [][]byte, startY, endY int) [][]byte {
-	height := endY - startY
-	totalHeight := len(world)
-	width := len(world)
+func calculateNextState(world [][]byte, height int) [][]byte {
+
+	width := len(world[0])
 	// New 2D that stores the next state
 	newWorld := make([][]byte, height)
 	for i := range newWorld {
 		newWorld[i] = make([]byte, width)
-		for j := range newWorld[i] {
-			newWorld[i][j] = world[i+startY][j]
-		}
 	}
 
 	for i := 0; i < height; i++ {
 		for j := 0; j < width; j++ {
-			newWorld[i][j] = newCellValue(world, i+startY, j, totalHeight, width)
+			newWorld[i][j] = newCellValue(world, i+1, j)
 		}
 	}
 
@@ -197,14 +216,14 @@ func calculateNextState(world [][]byte, startY, endY int) [][]byte {
 
 // Computes the value of a particular cell based on its neighbours
 // Sends CellFlipped events to notify the GUI about a change of state of a cell
-func newCellValue(world [][]byte, y int, x int, rows int, cols int) byte {
+func newCellValue(world [][]byte, y int, x int) byte {
 	aliveNeighbours := 0
-
+	cols := len(world[0])
 	// Iterate through the neighbours and count how many of them are alive
 	for i := y - 1; i <= y+1; i++ {
 		for j := x - 1; j <= x+1; j++ {
 			if !(i == y && j == x) {
-				if world[wrap(i, rows)][wrap(j, cols)] == gol.Alive {
+				if world[i][wrap(j, cols)] == gol.Alive {
 					aliveNeighbours++
 				}
 			}
