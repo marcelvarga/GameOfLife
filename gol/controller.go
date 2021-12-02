@@ -22,24 +22,20 @@ const (
 	Alive = 255
 )
 
-func makeCall(server rpc.Client, world [][]byte, p Params, c distributorChannels) [][]byte {
+func makeCall(server *rpc.Client, world [][]byte, p Params, c distributorChannels) [][]byte {
 	req := Request{
 		InitialWorld: world,
 		P:            p,
 		Events:       c.events,
 	}
-	resp := new(Result)
-	err := server.Call(WorldEvolution, req, resp)
-
-	if err != nil {
-		panic(err)
-	}
-	return resp.OutputWorld
+	res := new(Result)
+	_ = server.Call(WorldEvolution, req, res)
+	return res.OutputWorld
 }
-func requestAliveCells(server rpc.Client, ticker <-chan time.Time, c distributorChannels, stop chan bool, pause chan bool) {
+
+func requestAliveCells(server *rpc.Client, ticker <-chan time.Time, c distributorChannels, stop chan bool, pause chan bool, turns int) {
 	req := RequestAliveCells{}
 	res := new(ReportAliveCells)
-	done := make(chan *rpc.Call, 1)
 	for {
 		select {
 		case <-pause:
@@ -48,11 +44,15 @@ func requestAliveCells(server rpc.Client, ticker <-chan time.Time, c distributor
 		case <-stop:
 			return
 		case <-ticker:
-			server.Go(AliveCellsEvent, req, res, done)
-			<-done
+			err := server.Call(AliveCellsEvent, req, res)
+			handleErr(err)
+			if res.AliveCellsCountEv.CompletedTurns >= turns {
+				select {
+				case <-stop:
+				}
+				return
+			}
 			c.events <- res.AliveCellsCountEv
-		default:
-
 		}
 	}
 }
@@ -60,50 +60,59 @@ func requestAliveCells(server rpc.Client, ticker <-chan time.Time, c distributor
 func dealWithKey(server *rpc.Client, keyPresses <-chan rune, c distributorChannels, filename string, pause chan bool) {
 	req := RequestForKey{}
 	res := new(ReceiveFromKey)
-	done := make(chan *rpc.Call, 1)
 	for {
 		select {
 		case key := <-keyPresses:
 			switch key {
 			case sdl.K_q:
-				server.Go(Quit, req, res, done)
-				<-done
+				err := server.Call(Quit, req, res)
+				handleErr(err)
+
 				fmt.Println(res.Turn)
 				quit(res.ScreenshotWorld, c, res.Turn)
-				server.Close()
+				err = server.Close()
+				handleErr(err)
+
 				return
 			case sdl.K_s:
-				server.Go(Save, req, res, done)
-				<-done
+				err := server.Call(Save, req, res)
+				handleErr(err)
+
 				screenShot(res.ScreenshotWorld, c, filename, res.Turn)
 			case sdl.K_k:
-				server.Go(Quit, req, res, done)
-				<-done
+				err := server.Call(Quit, req, res)
+				handleErr(err)
 				var turn = res.Turn
 				var ssWorld = res.ScreenshotWorld
 
-				server.Go(Shut, req, res, done)
+				err = server.Call(Shut, req, res)
+				handleErr(err)
+
 				fmt.Println("Killing server and closing")
+
 				screenShot(res.ScreenshotWorld, c, filename, res.Turn)
 				quit(ssWorld, c, turn)
-				server.Close()
+
+				err = server.Close()
+				handleErr(err)
 
 			case sdl.K_p:
 				pause <- true
-				server.Go(Pause, req, res, done)
-				<-done
-				fmt.Println(res.Turn)
-				screenShot(res.ScreenshotWorld, c, filename, res.Turn)
-				dealWithPausing(keyPresses, pause)
-				server.Go(Resume, req, res, done)
-				<-done
+				err := server.Call(Pause, req, res)
+				handleErr(err)
+
+				fmt.Println("Pausing. Completed turns: ", res.Turn)
+				dealWithPause(keyPresses, pause)
+
+				err = server.Call(Resume, req, res)
+				handleErr(err)
 			}
 
 		}
 	}
 
 }
-func dealWithPausing(keyPresses <-chan rune, pause chan bool) {
+func dealWithPause(keyPresses <-chan rune, pause chan bool) {
 	for {
 		select {
 		case key := <-keyPresses:
@@ -112,15 +121,14 @@ func dealWithPausing(keyPresses <-chan rune, pause chan bool) {
 				fmt.Println("Continuing")
 				pause <- false
 				return
-			default:
 			}
 		}
 	}
 }
 
-// distributor divides the work between workers and interacts with other goroutines.
+// controller divides the work between workers and interacts with other goroutines.
 // Passes keypresses to dealWithKey
-func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
+func controller(p Params, c distributorChannels, keyPresses <-chan rune) {
 	ticker := time.Tick(2 * time.Second)
 
 	filename := fmt.Sprintf("%dx%d", p.ImageHeight, p.ImageWidth)
@@ -131,19 +139,19 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 	world := initialWorld
 
 	server, err := rpc.Dial("tcp", p.Server)
-	if err != nil {
-		fmt.Println(err)
-	}
+	handleErr(err)
 
 	stop := make(chan bool)
 	pause := make(chan bool)
 	go dealWithKey(server, keyPresses, c, filename, pause)
-	go requestAliveCells(*server, ticker, c, stop, pause)
-	world = makeCall(*server, world, p, c)
+	go requestAliveCells(server, ticker, c, stop, pause, p.Turns)
+	world = makeCall(server, world, p, c)
 	stop <- true
+
 	screenShot(world, c, filename, p.Turns)
 	quit(world, c, p.Turns)
-	server.Close()
+	err = server.Close()
+	handleErr(err)
 }
 
 func quit(world [][]byte, c distributorChannels, turn int) {
@@ -197,4 +205,9 @@ func generateBoard(p Params, c distributorChannels) [][]byte {
 		}
 	}
 	return world
+}
+func handleErr(err error) {
+	if err != nil {
+		panic(err)
+	}
 }
