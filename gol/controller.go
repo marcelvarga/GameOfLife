@@ -22,6 +22,99 @@ const (
 	Alive = 255
 )
 
+// controller divides the work between workers and interacts with other goroutines.
+// Passes keypresses to dealWithKey
+func controller(p Params, c distributorChannels, keyPresses <-chan rune) {
+	ticker := time.Tick(2 * time.Second)
+
+	filename := fmt.Sprintf("%dx%d", p.ImageHeight, p.ImageWidth)
+	c.ioCommand <- ioInput
+	c.ioFilename <- filename
+
+	initialWorld := generateBoard(p, c)
+	world := initialWorld
+
+	server, err := rpc.Dial("tcp", p.Server)
+	handleErr(err)
+
+	stop := make(chan bool)
+	pause := make(chan bool)
+	go dealWithKey(server, keyPresses, c, filename, pause)
+	go requestAliveCells(server, ticker, c, stop, pause, p.Turns)
+	var turn int
+	world, turn = makeCall(server, world, p, c)
+	stop <- true
+
+	screenShot(world, c, filename, turn)
+	quit(world, c, turn)
+	err = server.Close()
+	handleErr(err)
+}
+
+// Closes channels and sends Quitting event to SDL
+func quit(world [][]byte, c distributorChannels, turn int) {
+	alive := calculateAliveCells(world)
+	finalTurn := FinalTurnComplete{CompletedTurns: turn, Alive: alive}
+	//Send the final state on the events channel
+	c.events <- finalTurn
+	c.events <- StateChange{turn, Quitting}
+	close(c.events)
+
+}
+
+// Outputs world state to pgm file
+func screenShot(world [][]byte, c distributorChannels, filename string, turn int) {
+	c.ioCommand <- ioOutput
+	filename = filename + fmt.Sprintf("x%v", turn)
+	c.ioFilename <- filename
+	for i := range world {
+		for j := range world[i] {
+			c.ioOutput <- world[i][j]
+		}
+	}
+	c.ioCommand <- ioCheckIdle
+	<-c.ioIdle
+}
+
+// Counts the alive cells from the world and returns them into a slice
+func calculateAliveCells(world [][]byte) []util.Cell {
+	aliveCells := make([]util.Cell, 0)
+	for i := range world {
+		for j := range world[i] {
+			if world[i][j] == Alive {
+				aliveCells = append(aliveCells, util.Cell{X: j, Y: i})
+			}
+		}
+	}
+	return aliveCells
+}
+
+// Returns a 2D slice for the world to be stored in
+func generateBoard(p Params, c distributorChannels) [][]byte {
+	world := make([][]byte, p.ImageHeight)
+
+	for i := range world {
+		world[i] = make([]byte, p.ImageWidth)
+		for j := range world[i] {
+			world[i][j] = <-c.ioInput
+			if world[i][j] == Alive {
+				c.events <- CellFlipped{
+					Cell:           util.Cell{X: j, Y: i},
+					CompletedTurns: 0,
+				}
+			}
+		}
+	}
+	return world
+}
+
+func handleErr(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
+
+// Makes a RPC sending a world and waits for the final world as response
 func makeCall(server *rpc.Client, world [][]byte, p Params, c distributorChannels) ([][]byte, int) {
 	req := Request{
 		InitialWorld: world,
@@ -33,6 +126,7 @@ func makeCall(server *rpc.Client, world [][]byte, p Params, c distributorChannel
 	return res.OutputWorld, res.Turn
 }
 
+// Makes an RPC on the server every 2 seconds requesting alive cells count and turn number
 func requestAliveCells(server *rpc.Client, ticker <-chan time.Time, c distributorChannels, stop chan bool, pause chan bool, turns int) {
 	req := RequestAliveCells{}
 	res := new(ReportAliveCells)
@@ -59,6 +153,7 @@ func requestAliveCells(server *rpc.Client, ticker <-chan time.Time, c distributo
 	}
 }
 
+// Runs concurrently with controller and deals with keypresses
 func dealWithKey(server *rpc.Client, keyPresses <-chan rune, c distributorChannels, filename string, pause chan bool) {
 	req := RequestForKey{}
 	res := new(ReceiveFromKey)
@@ -99,6 +194,8 @@ func dealWithKey(server *rpc.Client, keyPresses <-chan rune, c distributorChanne
 	}
 
 }
+
+// Halts execution until next pause key
 func dealWithPause(keyPresses <-chan rune, pause chan bool) {
 	for {
 		select {
@@ -110,90 +207,5 @@ func dealWithPause(keyPresses <-chan rune, pause chan bool) {
 				return
 			}
 		}
-	}
-}
-
-// controller divides the work between workers and interacts with other goroutines.
-// Passes keypresses to dealWithKey
-func controller(p Params, c distributorChannels, keyPresses <-chan rune) {
-	ticker := time.Tick(2 * time.Second)
-
-	filename := fmt.Sprintf("%dx%d", p.ImageHeight, p.ImageWidth)
-	c.ioCommand <- ioInput
-	c.ioFilename <- filename
-
-	initialWorld := generateBoard(p, c)
-	world := initialWorld
-
-	server, err := rpc.Dial("tcp", p.Server)
-	handleErr(err)
-
-	stop := make(chan bool)
-	pause := make(chan bool)
-	go dealWithKey(server, keyPresses, c, filename, pause)
-	go requestAliveCells(server, ticker, c, stop, pause, p.Turns)
-	var turn int
-	world, turn = makeCall(server, world, p, c)
-	stop <- true
-
-	screenShot(world, c, filename, turn)
-	quit(world, c, turn)
-	err = server.Close()
-	handleErr(err)
-}
-
-func quit(world [][]byte, c distributorChannels, turn int) {
-	alive := calculateAliveCells(world)
-	finalTurn := FinalTurnComplete{CompletedTurns: turn, Alive: alive}
-	//Send the final state on the events channel
-	c.events <- finalTurn
-	c.events <- StateChange{turn, Quitting}
-	close(c.events)
-
-}
-func screenShot(world [][]byte, c distributorChannels, filename string, turn int) {
-	c.ioCommand <- ioOutput
-	filename = filename + fmt.Sprintf("x%v", turn)
-	c.ioFilename <- filename
-	for i := range world {
-		for j := range world[i] {
-			c.ioOutput <- world[i][j]
-		}
-	}
-	c.ioCommand <- ioCheckIdle
-	<-c.ioIdle
-}
-
-func calculateAliveCells(world [][]byte) []util.Cell {
-	aliveCells := make([]util.Cell, 0)
-	for i := range world {
-		for j := range world[i] {
-			if world[i][j] == Alive {
-				aliveCells = append(aliveCells, util.Cell{X: j, Y: i})
-			}
-		}
-	}
-	return aliveCells
-}
-func generateBoard(p Params, c distributorChannels) [][]byte {
-	world := make([][]byte, p.ImageHeight)
-
-	for i := range world {
-		world[i] = make([]byte, p.ImageWidth)
-		for j := range world[i] {
-			world[i][j] = <-c.ioInput
-			if world[i][j] == Alive {
-				c.events <- CellFlipped{
-					Cell:           util.Cell{X: j, Y: i},
-					CompletedTurns: 0,
-				}
-			}
-		}
-	}
-	return world
-}
-func handleErr(err error) {
-	if err != nil {
-		panic(err)
 	}
 }

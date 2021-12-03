@@ -2,7 +2,6 @@ package gol
 
 var WorldEvolution = "GolOperations.Evolve"
 var AliveCellsEvent = "GolOperations.ReportAliveCellsCount"
-var SendFLip = "GolOperations.GetFLip"
 var Save = "GolOperations.Save"
 var Quit = "GolOperations.Quit"
 var Kill = "GolOperations.Kill"
@@ -27,11 +26,6 @@ type ReportAliveCells struct {
 	AliveCellsCountEv AliveCellsCount
 }
 
-type RequestCellFlip struct {
-}
-type GetCellFlip struct {
-	Flip CellFlipped
-}
 type RequestForKey struct {
 }
 type ReceiveFromKey struct {

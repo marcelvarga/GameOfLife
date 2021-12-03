@@ -21,7 +21,6 @@ var stopReporting = false
 var pause = make(chan bool)
 var kill = make(chan bool)
 var quit = make(chan bool)
-var queue = make([]gol.CellFlipped, 0)
 
 func main() {
 	pAddr := flag.String("port", "8030", "Port to listen on")
@@ -41,6 +40,8 @@ func main() {
 
 }
 
+// Evolves a Gol world for the requested turns
+// Deals with keypresses coming through other remote procedure calls
 func (golOperation *GolOperations) Evolve(req gol.Request, res *gol.Result) (err error) {
 	//Initialize global variables for handling the new client
 	mutex.Lock()
@@ -53,7 +54,6 @@ func (golOperation *GolOperations) Evolve(req gol.Request, res *gol.Result) (err
 		return
 	}
 	fmt.Println("Got World")
-	fmt.Println(req.P)
 
 	fmt.Println("Proceeding to do the evolution")
 	world = req.InitialWorld
@@ -71,15 +71,15 @@ func (golOperation *GolOperations) Evolve(req gol.Request, res *gol.Result) (err
 		}
 		workerHeight = boardHeight / threads
 		if threads != 1 {
-			go worker(append(world[len(world)-1:], world[:workerHeight+1]...), workerHeight, channels[0], 0)
+			go worker(append(world[len(world)-1:], world[:workerHeight+1]...), workerHeight, channels[0])
 			i := 1
 			for ; i < threads-1; i++ {
-				go worker(world[i*workerHeight-1:(i+1)*workerHeight+1], workerHeight, channels[i], workerHeight*i)
+				go worker(world[i*workerHeight-1:(i+1)*workerHeight+1], workerHeight, channels[i])
 			}
-			go worker(append(world[i*workerHeight-1:], world[:1]...), boardHeight-workerHeight*i, channels[i], workerHeight*i)
+			go worker(append(world[i*workerHeight-1:], world[:1]...), boardHeight-workerHeight*i, channels[i])
 
 		} else {
-			go worker(append(append(world[len(world)-1:], world...), world[:1]...), workerHeight, channels[0], 0)
+			go worker(append(append(world[len(world)-1:], world...), world[:1]...), workerHeight, channels[0])
 		}
 
 		for i := 0; i < threads; i++ {
@@ -114,68 +114,7 @@ func (golOperation *GolOperations) Evolve(req gol.Request, res *gol.Result) (err
 	return
 }
 
-func (golOperation *GolOperations) ReportAliveCellsCount(req gol.RequestAliveCells, res *gol.ReportAliveCells) (err error) {
-	if stopReporting == true {
-		return
-	}
-
-	if world == nil {
-		return
-	}
-	mutex.Lock()
-	aliveCells := len(calculateAliveCells(world))
-	turnCount := turn
-	mutex.Unlock()
-
-	res.AliveCellsCountEv = gol.AliveCellsCount{
-		CellsCount:     aliveCells,
-		CompletedTurns: turnCount,
-	}
-	return
-}
-func (golOperation *GolOperations) GetFlip(req gol.RequestCellFlip, res *gol.GetCellFlip) (err error) {
-	if len(queue) > 0 {
-		res.Flip = queue[0]
-		queue = queue[1:]
-	}
-	return
-}
-func (golOperation *GolOperations) Kill(req gol.RequestForKey, res *gol.ReceiveFromKey) (err error) {
-
-	kill <- true
-	quit <- true
-	return
-}
-func (golOperation *GolOperations) Quit(req gol.RequestForKey, res *gol.ReceiveFromKey) (err error) {
-	mutex.Lock()
-	res.Turn = turn
-	res.ScreenshotWorld = world
-	quit <- true
-	mutex.Unlock()
-	return
-}
-func (golOperation *GolOperations) Pause(req gol.RequestForKey, res *gol.ReceiveFromKey) (err error) {
-	fmt.Println("Pausing")
-	mutex.Lock()
-	pause <- true
-	res.Turn = turn
-	res.ScreenshotWorld = world
-	mutex.Unlock()
-	return
-}
-func (golOperation *GolOperations) Resume(req gol.RequestForKey, res *gol.ReceiveFromKey) (err error) {
-	fmt.Println("execution will resume now")
-	pause <- false
-	return
-}
-func (golOperation *GolOperations) Save(req gol.RequestForKey, res *gol.ReceiveFromKey) (err error) {
-	mutex.Lock()
-	res.Turn = turn
-	res.ScreenshotWorld = world
-	mutex.Unlock()
-	return
-}
-
+// Puts all the alive cells in a slice and returns it
 func calculateAliveCells(world [][]byte) []util.Cell {
 	aliveCells := make([]util.Cell, 0)
 	for i := range world {
@@ -190,7 +129,7 @@ func calculateAliveCells(world [][]byte) []util.Cell {
 
 // Function used for splitting work between multiple threads
 // worker makes a "calculateNextState" call
-func worker(world [][]byte, height int, out chan<- [][]byte, offset int) {
+func worker(world [][]byte, height int, out chan<- [][]byte) {
 	partialWorld := calculateNextState(world, height)
 	out <- partialWorld
 }
@@ -215,7 +154,6 @@ func calculateNextState(world [][]byte, height int) [][]byte {
 }
 
 // Computes the value of a particular cell based on its neighbours
-// Sends CellFlipped events to notify the GUI about a change of state of a cell
 func newCellValue(world [][]byte, y int, x int) byte {
 	aliveNeighbours := 0
 	cols := len(world[0])
@@ -261,4 +199,66 @@ func wrap(x, n int) int {
 		return x & (n - 1)
 	}
 	return x % n
+}
+
+// Locks the world and turn variables, counts the alive cells and returns it to the controller
+func (golOperation *GolOperations) ReportAliveCellsCount(req gol.RequestAliveCells, res *gol.ReportAliveCells) (err error) {
+	if stopReporting == true {
+		return
+	}
+
+	if world == nil {
+		return
+	}
+	mutex.Lock()
+	aliveCells := len(calculateAliveCells(world))
+	turnCount := turn
+	mutex.Unlock()
+
+	res.AliveCellsCountEv = gol.AliveCellsCount{
+		CellsCount:     aliveCells,
+		CompletedTurns: turnCount,
+	}
+	return
+}
+
+// Stops the server
+func (golOperation *GolOperations) Kill(req gol.RequestForKey, res *gol.ReceiveFromKey) (err error) {
+	kill <- true
+	quit <- true
+	return
+}
+
+// Lets the server know that the controller is closing and stops the Evolve call
+func (golOperation *GolOperations) Quit(req gol.RequestForKey, res *gol.ReceiveFromKey) (err error) {
+	mutex.Lock()
+	res.Turn = turn
+	res.ScreenshotWorld = world
+	quit <- true
+	mutex.Unlock()
+	return
+}
+
+func (golOperation *GolOperations) Pause(req gol.RequestForKey, res *gol.ReceiveFromKey) (err error) {
+	fmt.Println("Pausing")
+	mutex.Lock()
+	pause <- true
+	res.Turn = turn
+	res.ScreenshotWorld = world
+	mutex.Unlock()
+	return
+}
+
+func (golOperation *GolOperations) Resume(req gol.RequestForKey, res *gol.ReceiveFromKey) (err error) {
+	fmt.Println("execution will resume now")
+	pause <- false
+	return
+}
+
+func (golOperation *GolOperations) Save(req gol.RequestForKey, res *gol.ReceiveFromKey) (err error) {
+	mutex.Lock()
+	res.Turn = turn
+	res.ScreenshotWorld = world
+	mutex.Unlock()
+	return
 }
