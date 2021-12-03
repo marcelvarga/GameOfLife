@@ -30,19 +30,29 @@ const (
 // distributor divides the work between workers and interacts with other goroutines.
 // Passes keypresses to dealWithKey
 func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
+
 	filename := fmt.Sprintf("%dx%d", p.ImageHeight, p.ImageWidth)
 	c.ioCommand <- ioInput
 	c.ioFilename <- filename
 	actionRequest := make(chan int)
 	resumeCh := make(chan bool)
 	world := make([][]byte, p.ImageHeight)
+	turn := 0
+	turnRequest := make(chan int)
+	ticker := time.Tick(2 * time.Second)
 
 	for i := range world {
+
 		world[i] = make([]byte, p.ImageWidth)
+
 		for j := range world[i] {
+
 			world[i][j] = <-c.ioInput
+
 			if world[i][j] == alive {
+
 				c.events <- CellFlipped{
+
 					Cell:           util.Cell{X: j, Y: i},
 					CompletedTurns: 0,
 				}
@@ -51,36 +61,41 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 	}
 
 	boardHeight := len(world)
-	turn := 0
-	turnRequest := make(chan int)
-	ticker := time.Tick(2 * time.Second)
+
 	go dealWithKey(keyPresses, turnRequest, actionRequest, resumeCh)
 
 	for ; turn < p.Turns; turn++ {
+
 		var newWorld [][]byte
 		var workerHeight int
-
 		threads := p.Threads
-
 		channels := make([]chan [][]byte, threads)
-		for i := range channels {
-			channels[i] = make(chan [][]byte)
-		}
 		workerHeight = boardHeight / threads
 
+		for i := range channels {
+
+			channels[i] = make(chan [][]byte)
+		}
+
+
 		if threads != 1 {
+
 			go worker(append(world[len(world)-1:], world[:workerHeight+1]...), workerHeight, channels[0], c, turn, 0)
 			i := 1
 			for ; i < threads-1; i++ {
+
 				go worker(world[i*workerHeight-1:(i+1)*workerHeight+1], workerHeight, channels[i], c, turn, workerHeight*i)
 			}
+
 			go worker(append(world[i*workerHeight-1:], world[:1]...), boardHeight-workerHeight*i, channels[i], c, turn, workerHeight*i)
 
 		} else {
+
 			go worker(append(append(world[len(world)-1:], world...), world[:1]...), workerHeight, channels[0], c, turn, 0)
 		}
 
 		for i := 0; i < threads; i++ {
+
 			newWorld = append(newWorld, <-channels[i]...)
 		}
 
@@ -90,13 +105,20 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 		resume := true
 
 		if requestedAction == pause {
+
 			turnRequest <- turn
 			secondAction := noAction
+
 			for secondAction != pause && secondAction != quitAndSave {
+
 				secondAction = <-actionRequest
+
 				if secondAction == save {
+
 					screenShot(world, c, filename, turn)
+
 				} else {
+
 					resume = <-resumeCh
 					if resume == false {
 						secondAction = quitAndSave
@@ -105,10 +127,12 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 			}
 		}
 		if requestedAction == save {
+
 			screenShot(world, c, filename, turn)
 			resume = <-resumeCh
 		}
 		if requestedAction == quitAndSave || resume == false {
+
 			screenShot(world, c, filename, turn)
 			quit(world, c, turn)
 			return
@@ -151,15 +175,21 @@ func actOrReturn(actionCh chan int) int {
 func dealWithKey(keyPresses <-chan rune, turnRequest, actionCh chan int, resumeCh chan bool) {
 	var turn int
 	for {
+
 		select {
+
 		case key := <-keyPresses:
+
 			switch key {
+
 			case sdl.K_q:
 				fmt.Println("Saving board and quitting")
 				actionCh <- quitAndSave
+
 			case sdl.K_s:
 				actionCh <- save
 				resumeCh <- true
+
 			case sdl.K_p:
 				actionCh <- pause
 				turn = <-turnRequest
@@ -174,7 +204,9 @@ func dealWithKey(keyPresses <-chan rune, turnRequest, actionCh chan int, resumeC
 
 func keyPressesOnPause(keyPresses <-chan rune, resumeCh chan bool, actionCh chan int) {
 	for {
+
 		select {
+
 		case key := <-keyPresses:
 			switch key {
 			case sdl.K_q:
@@ -182,8 +214,10 @@ func keyPressesOnPause(keyPresses <-chan rune, resumeCh chan bool, actionCh chan
 				actionCh <- quitAndSave
 				resumeCh <- false
 				return
+
 			case sdl.K_s:
 				actionCh <- save
+
 			case sdl.K_p:
 				fmt.Println("Continuing...")
 				actionCh <- pause
@@ -215,7 +249,9 @@ func screenShot(world [][]byte, c distributorChannels, filename string, turn int
 	c.ioFilename <- filename
 
 	for i := range world {
+
 		for j := range world[i] {
+
 			c.ioOutput <- world[i][j]
 		}
 	}
@@ -226,13 +262,16 @@ func screenShot(world [][]byte, c distributorChannels, filename string, turn int
 // If the ticker signalises that 2 seconds have passed, send an AliveCellsCount event down the c.events channel containing the number of alive cells
 func reportAliveCells(world [][]byte, ticker <-chan time.Time, c distributorChannels, turn int) {
 	select {
+
 	case <-ticker:
 		aliveCells := len(calculateAliveCells(world))
 
 		c.events <- AliveCellsCount{
+
 			CellsCount:     aliveCells,
 			CompletedTurns: turn,
 		}
+
 	default:
 		return
 	}
@@ -252,11 +291,13 @@ func calculateNextState(world [][]byte, height int, c distributorChannels, turn,
 	// New 2D that stores the next state
 	newWorld := make([][]byte, height)
 	for i := range newWorld {
+
 		newWorld[i] = make([]byte, width)
 	}
 
 	for i := 0; i < height; i++ {
 		for j := 0; j < width; j++ {
+
 			newWorld[i][j] = newCellValue(world, i+1, j, width, c, turn, offset)
 		}
 	}
@@ -267,13 +308,18 @@ func calculateNextState(world [][]byte, height int, c distributorChannels, turn,
 // Computes the value of a particular cell based on its neighbours
 // Sends CellFlipped events to notify the GUI about a change of state of a cell
 func newCellValue(world [][]byte, y, x, cols int, c distributorChannels, turn, offset int) byte {
+
 	aliveNeighbours := 0
 
 	// Iterate through the neighbours and count how many of them are alive
 	for i := y - 1; i <= y+1; i++ {
+
 		for j := x - 1; j <= x+1; j++ {
+
 			if !(i == y && j == x) {
+
 				if world[i][wrap(j, cols)] == alive {
+
 					aliveNeighbours++
 				}
 			}
@@ -281,33 +327,46 @@ func newCellValue(world [][]byte, y, x, cols int, c distributorChannels, turn, o
 	}
 
 	if world[y][x] == alive {
+
 		if aliveNeighbours < 2 || aliveNeighbours > 3 {
+
 			c.events <- CellFlipped{
+
 				Cell:           util.Cell{X: x, Y: y + offset - 1},
 				CompletedTurns: turn,
 			}
 			return dead
 		}
 		if (aliveNeighbours == 2) || aliveNeighbours == 3 {
+
 			return alive
 		}
 	}
 	if aliveNeighbours == 3 {
+
 		c.events <- CellFlipped{
+
 			Cell:           util.Cell{X: x, Y: y + offset - 1},
 			CompletedTurns: turn,
 		}
+
 		return alive
 	}
+
 	return dead
 }
 
 // Returns a slice with all the alive cells
 func calculateAliveCells(world [][]byte) []util.Cell {
+
 	aliveCells := make([]util.Cell, 0)
+
 	for i := range world {
+
 		for j := range world[i] {
+
 			if world[i][j] == alive {
+
 				aliveCells = append(aliveCells, util.Cell{X: j, Y: i})
 			}
 		}
