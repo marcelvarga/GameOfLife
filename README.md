@@ -1,5 +1,6 @@
 # CSA Coursework: Game of Life
 
+### **Note** : For benchmarking and more in depth information please see [the report](content/report.pdf).
 
 ## Task Overview
 
