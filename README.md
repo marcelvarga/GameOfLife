@@ -29,7 +29,7 @@ and communicate state between machines over a network.
 
 Separate the parallel implementation into two components. One component, the local controller, will be responsible for IO and capturing keypresses. The second component, the GOL Engine, will be responsible for actually processing the turns of Game of Life. 
 
-We start by implementing a basic controller which can tell the logic engine to evolve Game of Life for the number of turns specified in `gol.Params.Turns`. You can achieve this by implementing a single, blocking RPC call to process all requested turns.
+We start by implementing a basic controller which can tell the logic engine to evolve Game of Life for the number of turns specified in `gol.Params.Turns`. This is achieved by implementing a single, blocking RPC call to process all requested turns.
 
 ### Step 2
 
