@@ -53,7 +53,7 @@ Finally, the local controller should be able to manage the behaviour of the GoL 
 - If `s` is pressed, the controller should generate a PGM file with the current state of the board.
 - If `q` is pressed, close the controller client program without causing an error on the GoL server. A new controller should be able to take over interaction with the GoL engine.
 - If `k` is pressed, all components of the distributed system are shut down cleanly, and the system outputs a PGM image of the latest state.
-- If `p` is pressed, pause the processing *on the AWS node* and have the *controller* print the current turn that is being processed. If `p` is pressed again resume the processing and have the controller print `"Continuing"`. The keys `q` and `s` to work while the execution is paused.
+- If `p` is pressed, pause the processing *on the AWS node* and have the *controller* print the current turn that is being processed. If `p` is pressed again resume the processing and have the controller print `"Continuing"`. The keys `q` and `s` work while the execution is paused.
 
 
 
