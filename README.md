@@ -1,6 +1,6 @@
 # CSA Coursework: Game of Life
 
-### **Note** : For benchmarking and more in depth information please see [the report](content/report.pdf).
+### **Note** : For benchmarking and more in depth information please see [the report](content/report.pdf). For the distributed implementation please refer to the `distributed` branch.
 
 ## Task Overview
 
